@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="description"
+        content="Generalizable Articulated Object Reconstruction from Casually Captured RGBD Videos.">
+  <meta name="keywords" content="Cloth Manipulation, Learning from human Demonstration, Robot Learning">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Generalizable Articulated Object Reconstruction from Casually Captured RGBD Videos</title>
+
+  <!-- Global site tag (gtag.js) - Google Analytics -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-PYVRSFMDRL"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+
+    function gtag() {
+      dataLayer.push(arguments);
+    }
+
+    gtag('js', new Date());
+
+    gtag('config', 'G-PYVRSFMDRL');
+  </script>
+
+  <link href="https://fonts.googleapis.com/css?family=Google+Sans|Noto+Sans|Castoro"
+        rel="stylesheet">
+
+  <link rel="stylesheet" href="./static/css/bulma.min.css">
+  <link rel="stylesheet" href="./static/css/bulma-carousel.min.css">
+  <link rel="stylesheet" href="./static/css/bulma-slider.min.css">
+  <link rel="stylesheet" href="./static/css/fontawesome.all.min.css">
+  <link rel="stylesheet"
+        href="https://cdn.jsdelivr.net/gh/jpswalsh/academicons@1/css/academicons.min.css">
+  <link rel="stylesheet" href="./static/css/index.css">
+  <link rel="icon" href="./static/images/favicon.svg">
+
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+  <script defer src="./static/js/fontawesome.all.min.js"></script>
+  <script src="./static/js/bulma-carousel.min.js"></script>
+  <script src="./static/js/bulma-slider.min.js"></script>
+  <script src="./static/js/index.js"></script>
+</head>
+
+<body>
+
+<section class="hero">
+  <div class="hero-body">
+    <div class="container is-max-desktop">
+      <div class="columns is-centered">
+        <div class="column has-text-centered">
+          <h1 class="title is-1 publication-title">Generalizable Articulated Object Reconstruction from Casually Captured RGBD Videos</h1>
+          <div class="is-size-5 publication-authors">
+            <span class="author-block">
+              <a href="https://www.linkedin.com/in/weikun-peng-7731281b4/">Weikun Peng</a><sup>1</sup>,
+            </span>
+            <span class="author-block">
+              <a href="https://lyuj1998.github.io/">Jun Lv</a><sup>2</sup>,
+            </span>
+            <span class="author-block">
+              <a href="https://www.mvig.org/">Cewu Lu</a><sup>2</sup>,
+            </span>
+            <span class="author-block">
+              <a href="https://msavva.github.io/">Manolis Savva</a><sup>1</sup>
+            </span>
+          </div>
+
+          <div class="is-size-5 publication-authors">
+            <span class="author-block"><sup>1</sup>Simon Fraser University,</span>
+            <span class="author-block"><sup>2</sup>Shanghai Jiao Tong University</span>
+          </div>
+
+          <!-- <h1 class="title is-3 publication-title">CoRL 2024 <font color="red">(Oral)</font> </h1> -->
+
+          <div class="column has-text-centered">
+            <div class="publication-links">
+              <!-- <span class="link-block">
+                <a href="https://arxiv.org/pdf/2011.12948"
+                   class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon">
+                      <i class="fas fa-file-pdf"></i>
+                  </span>
+                  <span>Paper</span>
+                </a>
+              </span> -->
+              <!-- <span class="link-block">
+                <a href="http://arxiv.org/abs/2407.03245"
+                   class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon">
+                      <i class="ai ai-arxiv"></i>
+                  </span>
+                  <span>arXiv</span>
+                </a>
+              </span> -->
+              <!-- <span class="link-block">
+                <a href="https://www.youtube.com/watch?v=MrKrnHhk8IA"
+                   class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon">
+                      <i class="fab fa-youtube"></i>
+                  </span>
+                  <span>Video</span>
+                </a>
+              </span>
+              <span class="link-block">
+                <a href="https://github.com/google/nerfies"
+                   class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon">
+                      <i class="fab fa-github"></i>
+                  </span>
+                  <span>Code</span>
+                  </a>
+              </span>
+              <span class="link-block">
+                <a href="https://github.com/google/nerfies/releases/tag/0.1"
+                   class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon">
+                      <i class="far fa-images"></i>
+                  </span>
+                  <span>Data</span>
+                  </a> -->
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<section class="hero is-light is-small">
+  <div class="hero-body">
+    <div class="container">
+      <!-- Abstract. -->
+      <div class="columns is-centered has-text-centered">
+        <div class="column is-four-fifths">
+          <h2 class="title is-3">Abstract</h2>
+          <div class="content has-text-justified">
+            <p>
+              Articulated objects are prevalent in daily life. Understanding their kinematic structure and reconstructing them 
+              have numerous applications in embodied AI and robotics. However, current methods require carefully captured data for training or inference, 
+              preventing practical, scalable, and generalizable reconstruction of articulated objects. 
+              We focus on reconstruction of an articulated object from a casually captured RGBD video shot with a hand-held camera. 
+              A casually captured video of an interaction with an articulated object is easy to acquire at scale using smartphones. 
+              However, this setting is quite challenging, as the object and camera move simultaneously and there are significant occlusions as the person interacts with the object. 
+              To tackle these challenges, we introduce a coarse-to-fine framework that infers joint parameters and segments movable parts of the object from a dynamic RGBD video. 
+              To evaluate our method under this new setting, we build a 20&times larger synthetic dataset of 784 videos containing 284 objects across 11 categories. 
+              We compare our approach with existing methods that also take video as input. 
+              Experiments show that our method can reconstruct synthetic and real articulated objects across different categories from dynamic RGBD videos, 
+              outperforming existing methods significantly.
+            </p>
+          </div>
+        </div>
+      </div>
+      <!--/ Abstract. -->
+          
+      <!-- Paper video. -->
+      <div class="columns is-centered has-text-centered">
+        <div class="column is-four-fifths">
+          <h2 class="title is-3">Video Summary</h2>
+          <!-- <video id="towel" controls playsinline height="100%">
+            <source src="./static/videos/video_summary_bgm.mp4"
+                    type="video/mp4">
+          </video> -->
+      </div>
+      <!--/ Paper video. -->
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container is-max-desktop">
+    <h2 class="title is-3">Pipeline Overview</h2>
+    <p>
+      Given an casually captured RGBD video, our pipeline first estimates joint parameters and a movable part segmentation via image feature matching. 
+      Then, a gradient-based optimization framework refines these initial estimates against a surface point cloud representation of the object acquired through 3D reconstruction. 
+      Different from some existing work modeling articulated objects with implicit representation, our pipeline explicitly parameterizes the articulation joint parameters and other relevant parameters. 
+      Moreover, our pipeline neither relies on an external library nor requires additional data for fine-tuning. Instead, it only uses pretrained models.
+    </p>
+    
+    <!-- Coarse Prediction -->
+    <div class="column">
+      <h3 class="title is-4">Coarse Prediction</h3>
+    </div>
+    <!--/ Coarse Prediction -->
+
+    <!-- Refinement -->
+    <div class="column">
+      <h3 class="title is-4">Refinement</h3>
+    </div>
+    <!--/ Refinement -->
+
+  </div>
+</section>
+
+<section class="section">
+  <div class="container is-max-desktop">
+    <h2 class="title is-3">Dataset Overview</h2>
+    <p>
+      Since the problem setting and task setup we described has not been previously addressed, we build a new dataset for evaluation. 
+      We select 284 synthetic objects from 11 categories in the PartNet-Mobility dataset to generate dynamic videos for input and evaluate the performance of our method. 
+      Compared to datasets used in prior works, our dataset contains 20&times more objects 
+      and thus provides a more robust evaluation of the performance of different methods for reconstructing articulated objects from dynamic videos.
+    </p>
+    
+    <!-- Data Generation Setup -->
+    <div class="column">
+      <h3 class="title is-4">Data Generation Setup</h3>
+    </div>
+    <!--/ Data Generation Setup -->
+
+    <!-- Data Samples -->
+    <div class="column">
+      <h3 class="title is-4">Data Samples</h3>
+    </div>
+    <!--/ Data Samples -->
+  </div>
+</section>
+
+<section class="section">
+  <div class="container is-max-desktop">
+
+    <h2 class="title is-3">Experiment Results</h2>
+    
+    <!-- Synthetic Data Results -->
+    <div class="column">
+      <h3 class="title is-4">Synthetic Data</h3>
+    </div>
+    <!--/ Synthetic Data Results -->
+
+    <!-- Real Data Results. -->
+    <div class="column">
+      <h3 class="title is-4">Real Data</h3>
+    </div>
+    <!--/ Real Data Results. -->
+
+  </div>
+
+</section>
+
+<!-- <section class="section">
+  <div class="container">
+    <h2 class="title is-3">Local Feature Matching</h2>
+    <p>
+      We use <i>LoFTr</i> to build feature matching between two consecutive images. Here are some examples of feature matching results.
+    </p>
+    <h2 class="title is-4">First tie-knotting task</h2>
+    <div id="results-carousel" class="carousel results-carousel">
+      <div class="item item-steve">
+        <img src="./static/images/feature_matching/tie1/217-to-225.png"
+                class="interpolation-image"
+                alt="Interpolate start reference image."/>
+      </div>
+      <div class="item item-chair-tp">
+        <img src="./static/images/feature_matching/tie1/385-to-393.png"
+                class="interpolation-image"
+                alt="Interpolate start reference image."/>
+      </div>
+      <div class="item item-shiba">
+        <img src="./static/images/feature_matching/tie1/713-to-721.png"
+                class="interpolation-image"
+                alt="Interpolate start reference image."/>
+      </div>
+      <div class="item item-fullbody">
+        <img src="./static/images/feature_matching/tie1/1025-to-1033.png"
+                class="interpolation-image"
+                alt="Interpolate start reference image."/>
+      </div>
+      <div class="item item-blueshirt">
+        <img src="./static/images/feature_matching/tie1/1273-to-1281.png"
+                class="interpolation-image"
+                alt="Interpolate start reference image."/>
+      </div>
+      <div class="item item-mask">
+        <img src="./static/images/feature_matching/tie1/1553-to-1561.png"
+                class="interpolation-image"
+                alt="Interpolate start reference image."/>
+      </div>
+    </div>
+
+    <h2 class="title is-4">Second tie-knotting task</h2>
+    <div id="results-carousel" class="carousel results-carousel">
+      <div class="item item-steve">
+        <img src="./static/images/feature_matching/tie2/181-to-187.png"
+                class="interpolation-image"
+                alt="Interpolate start reference image."/>
+      </div>
+      <div class="item item-chair-tp">
+        <img src="./static/images/feature_matching/tie2/403-to-409.png"
+                class="interpolation-image"
+                alt="Interpolate start reference image."/>
+      </div>
+      <div class="item item-shiba">
+        <img src="./static/images/feature_matching/tie2/1315-to-1321.png"
+                class="interpolation-image"
+                alt="Interpolate start reference image."/>
+      </div>
+      <div class="item item-fullbody">
+        <img src="./static/images/feature_matching/tie2/1693-to-1699.png"
+                class="interpolation-image"
+                alt="Interpolate start reference image."/>
+      </div>
+      <div class="item item-blueshirt">
+        <img src="./static/images/feature_matching/tie2/2179-to-2185.png"
+                class="interpolation-image"
+                alt="Interpolate start reference image."/>
+      </div>
+      <div class="item item-mask">
+        <img src="./static/images/feature_matching/tie2/2401-to-2407.png"
+                class="interpolation-image"
+                alt="Interpolate start reference image."/>
+      </div>
+    </div>
+
+    <h2 class="title is-4">Towel-folding task</h2>
+    <div id="results-carousel" class="carousel results-carousel">
+      <div class="item item-steve">
+        <img src="./static/images/feature_matching/towel/331-to-341.png"
+                class="interpolation-image"
+                alt="Interpolate start reference image."/>
+      </div>
+      <div class="item item-chair-tp">
+        <img src="./static/images/feature_matching/towel/491-to-501.png"
+                class="interpolation-image"
+                alt="Interpolate start reference image."/>
+      </div>
+      <div class="item item-shiba">
+        <img src="./static/images/feature_matching/towel/681-to-691.png"
+                class="interpolation-image"
+                alt="Interpolate start reference image."/>
+      </div>
+      <div class="item item-fullbody">
+        <img src="./static/images/feature_matching/towel/911-to-921.png"
+                class="interpolation-image"
+                alt="Interpolate start reference image."/>
+      </div>
+      <div class="item item-blueshirt">
+        <img src="./static/images/feature_matching/towel/1001-to-1011.png"
+                class="interpolation-image"
+                alt="Interpolate start reference image."/>
+      </div>
+      <div class="item item-mask">
+        <img src="./static/images/feature_matching/towel/1081-to-1091.png"
+                class="interpolation-image"
+                alt="Interpolate start reference image."/>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container">
+    <h2 class="title is-3">Keypoints Detection</h2>
+    <p>
+      In our Real2Sim pipeline, we use existing estimated results to train keypoints detection model. Here we illustrate several detection results.
+      The blue arrow is the predicted z-axis. The green arrow is the predicted x-axis.
+    </p>
+    <h2 class="title is-4">First tie-knotting task</h2>
+    <div id="results-carousel" class="carousel results-carousel">
+      <div class="item item-steve">
+        <img src="./static/images/keypoints/tie1/217.png"
+                class="interpolation-image"
+                alt="Interpolate start reference image."/>
+      </div>
+      <div class="item item-chair-tp">
+        <img src="./static/images/keypoints/tie1/401.png"
+                class="interpolation-image"
+                alt="Interpolate start reference image."/>
+      </div>
+      <div class="item item-shiba">
+        <img src="./static/images/keypoints/tie1/753.png"
+                class="interpolation-image"
+                alt="Interpolate start reference image."/>
+      </div>
+      <div class="item item-fullbody">
+        <img src="./static/images/keypoints/tie1/1201.png"
+                class="interpolation-image"
+                alt="Interpolate start reference image."/>
+      </div>
+      <div class="item item-blueshirt">
+        <img src="./static/images/keypoints/tie1/1441.png"
+                class="interpolation-image"
+                alt="Interpolate start reference image."/>
+      </div>
+      <div class="item item-mask">
+        <img src="./static/images/keypoints/tie1/1553.png"
+                class="interpolation-image"
+                alt="Interpolate start reference image."/>
+      </div>
+    </div>
+
+    <h2 class="title is-4">Second tie-knotting task</h2>
+    <div id="results-carousel" class="carousel results-carousel">
+      <div class="item item-steve">
+        <img src="./static/images/keypoints/tie2/229.png"
+                class="interpolation-image"
+                alt="Interpolate start reference image."/>
+      </div>
+      <div class="item item-chair-tp">
+        <img src="./static/images/keypoints/tie2/487.png"
+                class="interpolation-image"
+                alt="Interpolate start reference image."/>
+      </div>
+      <div class="item item-shiba">
+        <img src="./static/images/keypoints/tie2/1135.png"
+                class="interpolation-image"
+                alt="Interpolate start reference image."/>
+      </div>
+      <div class="item item-fullbody">
+        <img src="./static/images/keypoints/tie2/1489.png"
+                class="interpolation-image"
+                alt="Interpolate start reference image."/>
+      </div>
+      <div class="item item-blueshirt">
+        <img src="./static/images/keypoints/tie2/1669.png"
+                class="interpolation-image"
+                alt="Interpolate start reference image."/>
+      </div>
+      <div class="item item-mask">
+        <img src="./static/images/keypoints/tie2/2137.png"
+                class="interpolation-image"
+                alt="Interpolate start reference image."/>
+      </div>
+      <div class="item item-mask">
+        <img src="./static/images/keypoints/tie2/2365.png"
+                class="interpolation-image"
+                alt="Interpolate start reference image."/>
+      </div>
+    </div>
+
+  </div>
+</section> -->
+
+<section class="section">
+  <div class="container is-max-desktop">
+    <div class="columns is-centered has-text-centered">
+      <div class="column is-four-fifths">
+        <h2 class="title is-3">Acknowledgement</h2>
+        <div class="content has-text-justified">
+          <p>
+            
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="BibTeX">
+  <div class="container is-max-desktop content">
+    <h2 class="title">BibTeX</h2>
+    <pre><code></code></pre>
+  </div>
+</section>
+
+
+<footer class="footer">
+  <div class="container">
+    <!-- <div class="content has-text-centered">
+      <a class="icon-link"
+         href="./static/videos/nerfies_paper.pdf">
+        <i class="fas fa-file-pdf"></i>
+      </a>
+      <a class="icon-link" href="https://github.com/keunhong" class="external-link" disabled>
+        <i class="fab fa-github"></i>
+      </a>
+    </div> -->
+    <div class="columns is-centered">
+      <div class="column is-8">
+        <div class="content">
+          <p>
+            This website is modified from <a
+            href="https://nerfies.github.io/">Nerfies</a>.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
