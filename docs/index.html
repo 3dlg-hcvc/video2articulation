@@ -7,6 +7,36 @@
   <meta name="keywords" content="Cloth Manipulation, Learning from human Demonstration, Robot Learning">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Generalizable Articulated Object Reconstruction from Casually Captured RGBD Videos</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+    }
+    .grid-container {
+      display: grid;
+      gap: 10px;
+      margin-bottom: 40px;
+    }
+    .grid-4x4 {
+      grid-template-columns: repeat(4, 1fr);
+    }
+    .grid-5x4 {
+      grid-template-columns: repeat(5, 1fr);
+    }
+    .grid-item {
+      text-align: center;
+    }
+    .grid_video {
+      width: auto;
+      height: 200px;
+      max-height: 200px;
+      border: 1px solid #ccc;
+    }
+    .method-title {
+      font-weight: bold;
+      margin-bottom: 5px;
+    }
+  </style>
 
   <!-- Global site tag (gtag.js) - Google Analytics -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-PYVRSFMDRL"></script>
@@ -180,12 +210,33 @@
     <!-- Coarse Prediction -->
     <div class="column">
       <h3 class="title is-4">Coarse Prediction</h3>
+      <!-- <img src="./static/images/coarse_animation-crop.gif" class="interpolation-image" alt="Interpolation end reference image." /> -->
+       <video id="coarse" controls autoplay muted loop playsinline height="100%">
+        <source src="./static/videos/coarse_animation_crop.mp4"
+                type="video/mp4">
+      </video>
+      <p>
+        An overview of our coarse prediction pipeline. We first use feature matching in the static
+        regions to estimate relative camera poses and align all observations to the same coordinate. Then,
+        we compute the transformation using feature matching in the dynamic regions to estimate joint
+        parameters for that pair of frames. Finally, we average out all the results to produce a joint parameter estimation.
+      </p>
     </div>
     <!--/ Coarse Prediction -->
 
     <!-- Refinement -->
     <div class="column">
       <h3 class="title is-4">Refinement</h3>
+      <!-- <img src="./static/images/refine_animation-crop.gif" class="interpolation-image" alt="Interpolation end reference image." /> -->
+        <video id="refinement" controls autoplay muted loop playsinline height="100%">
+          <source src="./static/videos/refine_animation_crop.mp4"
+                  type="video/mp4">
+        </video>
+        <p>
+          An overview of our refinement pipeline. We transform observations in the video back to
+          the initial stage with camera poses and joint parameters. We then compute the chamfer distance from
+          the transformed observation to the object surface as a loss function and optimize relevant parameters.
+        </p>
     </div>
     <!--/ Refinement -->
 
@@ -205,12 +256,66 @@
     <!-- Data Generation Setup -->
     <div class="column">
       <h3 class="title is-4">Data Generation Setup</h3>
+      <img src="./static/images/scene illustration.png" class="interpolation-image" alt="Interpolation end reference image." />
+      <p>
+        We build a simple cuboid environment in the SAPIEN simulator with realistic textures and place the object inside to manipulate it.
+      </p>
+      <video id="refinement" controls autoplay muted loop playsinline height="100%">
+        <source src="./static/videos/data_generation_animation.mp4"
+                type="video/mp4">
+      </video>
+      <p>
+        We first render multi-view RGBD images of the object at the initial state to generate an object surface point cloud on the right-hand side. 
+        Then, to increase the diversity of the video, we place two cameras in front of the moving part of the object to record the interaction videos from two different views.
+      </p>
+      <img src="./static/images/data distribution.svg" class="interpolation-image" alt="Interpolation end reference image." />
+      <p>
+        We finally generate 784 videos of 284 objects across 11 categories. The data distribution across different categories is shown in the bar chart above.
+      </p>
     </div>
     <!--/ Data Generation Setup -->
 
     <!-- Data Samples -->
     <div class="column">
       <h3 class="title is-4">Data Samples</h3>
+      <div id="results-carousel" class="carousel results-carousel">
+        <div class="item item-box">
+          <video id="box" controls autoplay muted loop playsinline height="100%">
+          <source src="./static/videos/box.mp4"
+                  type="video/mp4">
+        </video>
+        </div>
+        <div class="item dishwasher">
+          <video id="dishwasher" controls autoplay muted loop playsinline height="100%">
+          <source src="./static/videos/dishwasher.mp4"
+                  type="video/mp4">
+        </video>
+        </div>
+        <div class="item laptop">
+          <video id="laptop" controls autoplay muted loop playsinline height="100%">
+          <source src="./static/videos/laptop.mp4"
+                  type="video/mp4">
+        </video>
+        </div>
+        <div class="item scissors">
+          <video id="scissors" controls autoplay muted loop playsinline height="100%">
+          <source src="./static/videos/scissors.mp4"
+                  type="video/mp4">
+        </video>
+        </div>
+        <div class="item storagefurniture">
+          <video id="storagefurniture" controls autoplay muted loop playsinline height="100%">
+          <source src="./static/videos/storagefurniture.mp4"
+                  type="video/mp4">
+        </video>
+        </div>
+        <div class="item washingmachine">
+          <video id="washingmachine" controls autoplay muted loop playsinline height="100%">
+          <source src="./static/videos/washingmachine.mp4"
+                  type="video/mp4">
+        </video>
+        </div>
+      </div>
     </div>
     <!--/ Data Samples -->
   </div>
@@ -224,211 +329,254 @@
     <!-- Synthetic Data Results -->
     <div class="column">
       <h3 class="title is-4">Synthetic Data</h3>
+
+      <div class="grid-container grid-5x4">
+        <!-- Row 1 -->
+        <div class="grid-item">
+          <div class="method-title">Input Video</div>
+          <video class="grid_video" controls autoplay muted loop playsinline>
+            <source src="./static/videos/7265/video.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+        <div class="grid-item">
+          <div class="method-title">Ground Truth</div>
+          <video class="grid_video" controls autoplay muted loop playsinline>
+            <source src="./static/videos/7265/gt_motion.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+        <div class="grid-item">
+          <div class="method-title">Articulate-Anything</div>
+          <video class="grid_video" controls autoplay muted loop playsinline>
+            <source src="./static/videos/7265/artany_motion.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+        <div class="grid-item">
+          <div class="method-title">RSRD</div>
+          <!-- <video src="" controls></video> -->
+          <p>failed</p>
+        </div>
+        <div class="grid-item">
+          <div class="method-title">Ours</div>
+          <video class="grid_video" controls autoplay muted loop playsinline>
+            <source src="./static/videos/7265/our_motion.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+
+        <!-- Row 2 -->
+        <div class="grid-item">
+          <video class="grid_video" controls autoplay muted loop playsinline>
+            <source src="./static/videos/103273/video.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+        <div class="grid-item">
+          <video class="grid_video" controls autoplay muted loop playsinline>
+            <source src="./static/videos/103273/gt_motion.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+        <div class="grid-item">
+          <video class="grid_video" controls autoplay muted loop playsinline>
+            <source src="./static/videos/103273/artany_motion.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+        <div class="grid-item">
+          <video class="grid_video" controls autoplay muted loop playsinline>
+            <source src="./static/videos/103273/rsrd_motion.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+        <div class="grid-item">
+          <video class="grid_video" controls autoplay muted loop playsinline>
+            <source src="./static/videos/103273/our_motion.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+
+        <!-- Row 3 -->
+        <div class="grid-item">
+          <video class="grid_video" controls autoplay muted loop playsinline>
+            <source src="./static/videos/19898/video.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+        <div class="grid-item">
+          <video class="grid_video" controls autoplay muted loop playsinline>
+            <source src="./static/videos/19898/gt_motion.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+        <div class="grid-item">
+          <video class="grid_video" controls autoplay muted loop playsinline>
+            <source src="./static/videos/19898/artany_motion.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+        <div class="grid-item">
+          <video class="grid_video" controls autoplay muted loop playsinline>
+            <source src="./static/videos/19898/rsrd_motion.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+        <div class="grid-item">
+          <video class="grid_video" controls autoplay muted loop playsinline>
+            <source src="./static/videos/19898/our_motion.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+
+        <!-- Row 4 -->
+        <div class="grid-item">
+          <video class="grid_video" controls autoplay muted loop playsinline>
+            <source src="./static/videos/100072/video.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+        <div class="grid-item">
+          <video class="grid_video" controls autoplay muted loop playsinline>
+            <source src="./static/videos/100072/gt_motion.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+        <div class="grid-item">
+          <video class="grid_video" controls autoplay muted loop playsinline>
+            <source src="./static/videos/100072/artany_motion.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+        <div class="grid-item">
+          <!-- <video src="./static/videos/100072/rsrd_motion.mp4" controls></video> -->
+           <p>Failed</p>
+        </div>
+        <div class="grid-item">
+          <video class="grid_video" controls autoplay muted loop playsinline>
+            <source src="./static/videos/100072/our_motion.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+      </div>
+
     </div>
     <!--/ Synthetic Data Results -->
 
     <!-- Real Data Results. -->
     <div class="column">
       <h3 class="title is-4">Real Data</h3>
+      <div class="grid-container grid-4x4">
+        <!-- Row 1 -->
+        <div class="grid-item">
+          <div class="method-title">Input Video</div>
+          <video class="grid_video" controls autoplay muted loop playsinline>
+            <source src="./static/videos/book/book2.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+        <div class="grid-item">
+          <div class="method-title">Articulate-Anything</div>
+          <video class="grid_video" controls autoplay muted loop playsinline>
+            <source src="./static/videos/book/artany_motion.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+        <div class="grid-item">
+          <div class="method-title">RSRD</div>
+          <!-- <video src="" controls></video> -->
+          <p>failed</p>
+        </div>
+        <div class="grid-item">
+          <div class="method-title">Ours</div>
+          <video class="grid_video" controls autoplay muted loop playsinline>
+            <source src="./static/videos/book/our_motion.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+
+        <!-- Row 2 -->
+        <div class="grid-item">
+          <video class="grid_video" controls autoplay muted loop playsinline>
+            <source src="./static/videos/cabinet_door2/cabinet_door2.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+        <div class="grid-item">
+          <video class="grid_video" controls autoplay muted loop playsinline>
+            <source src="./static/videos/cabinet_door2/artany_motion.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+        <div class="grid-item">
+          <video class="grid_video" controls autoplay muted loop playsinline>
+            <source src="./static/videos/cabinet_door2/rsrd_motion.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+        <div class="grid-item">
+          <video class="grid_video" controls autoplay muted loop playsinline>
+            <source src="./static/videos/cabinet_door2/our_motion.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+
+        <!-- Row 3 -->
+        <div class="grid-item">
+          <video class="grid_video" controls autoplay muted loop playsinline>
+            <source src="./static/videos/drawer3_2/drawer3_2.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+        <div class="grid-item">
+          <video class="grid_video" controls autoplay muted loop playsinline>
+            <source src="./static/videos/drawer3_2/artany_motion.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+        <div class="grid-item">
+          <p>Failed</p>
+        </div>
+        <div class="grid-item">
+          <video class="grid_video" controls autoplay muted loop playsinline>
+            <source src="./static/videos/drawer3_2/our_motion.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+
+        <!-- Row 4 -->
+        <div class="grid-item">
+          <video class="grid_video" controls autoplay muted loop playsinline>
+            <source src="./static/videos/room_storage/room_storage.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+        <div class="grid-item">
+          <video class="grid_video" controls autoplay muted loop playsinline>
+            <source src="./static/videos/room_storage/artany_motion.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+        <div class="grid-item">
+          <video class="grid_video" controls autoplay muted loop playsinline>
+            <source src="./static/videos/room_storage/rsrd_motion.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+        <div class="grid-item">
+          <video class="grid_video" controls autoplay muted loop playsinline>
+            <source src="./static/videos/room_storage/our_motion.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+      </div>
     </div>
     <!--/ Real Data Results. -->
 
   </div>
 
 </section>
-
-<!-- <section class="section">
-  <div class="container">
-    <h2 class="title is-3">Local Feature Matching</h2>
-    <p>
-      We use <i>LoFTr</i> to build feature matching between two consecutive images. Here are some examples of feature matching results.
-    </p>
-    <h2 class="title is-4">First tie-knotting task</h2>
-    <div id="results-carousel" class="carousel results-carousel">
-      <div class="item item-steve">
-        <img src="./static/images/feature_matching/tie1/217-to-225.png"
-                class="interpolation-image"
-                alt="Interpolate start reference image."/>
-      </div>
-      <div class="item item-chair-tp">
-        <img src="./static/images/feature_matching/tie1/385-to-393.png"
-                class="interpolation-image"
-                alt="Interpolate start reference image."/>
-      </div>
-      <div class="item item-shiba">
-        <img src="./static/images/feature_matching/tie1/713-to-721.png"
-                class="interpolation-image"
-                alt="Interpolate start reference image."/>
-      </div>
-      <div class="item item-fullbody">
-        <img src="./static/images/feature_matching/tie1/1025-to-1033.png"
-                class="interpolation-image"
-                alt="Interpolate start reference image."/>
-      </div>
-      <div class="item item-blueshirt">
-        <img src="./static/images/feature_matching/tie1/1273-to-1281.png"
-                class="interpolation-image"
-                alt="Interpolate start reference image."/>
-      </div>
-      <div class="item item-mask">
-        <img src="./static/images/feature_matching/tie1/1553-to-1561.png"
-                class="interpolation-image"
-                alt="Interpolate start reference image."/>
-      </div>
-    </div>
-
-    <h2 class="title is-4">Second tie-knotting task</h2>
-    <div id="results-carousel" class="carousel results-carousel">
-      <div class="item item-steve">
-        <img src="./static/images/feature_matching/tie2/181-to-187.png"
-                class="interpolation-image"
-                alt="Interpolate start reference image."/>
-      </div>
-      <div class="item item-chair-tp">
-        <img src="./static/images/feature_matching/tie2/403-to-409.png"
-                class="interpolation-image"
-                alt="Interpolate start reference image."/>
-      </div>
-      <div class="item item-shiba">
-        <img src="./static/images/feature_matching/tie2/1315-to-1321.png"
-                class="interpolation-image"
-                alt="Interpolate start reference image."/>
-      </div>
-      <div class="item item-fullbody">
-        <img src="./static/images/feature_matching/tie2/1693-to-1699.png"
-                class="interpolation-image"
-                alt="Interpolate start reference image."/>
-      </div>
-      <div class="item item-blueshirt">
-        <img src="./static/images/feature_matching/tie2/2179-to-2185.png"
-                class="interpolation-image"
-                alt="Interpolate start reference image."/>
-      </div>
-      <div class="item item-mask">
-        <img src="./static/images/feature_matching/tie2/2401-to-2407.png"
-                class="interpolation-image"
-                alt="Interpolate start reference image."/>
-      </div>
-    </div>
-
-    <h2 class="title is-4">Towel-folding task</h2>
-    <div id="results-carousel" class="carousel results-carousel">
-      <div class="item item-steve">
-        <img src="./static/images/feature_matching/towel/331-to-341.png"
-                class="interpolation-image"
-                alt="Interpolate start reference image."/>
-      </div>
-      <div class="item item-chair-tp">
-        <img src="./static/images/feature_matching/towel/491-to-501.png"
-                class="interpolation-image"
-                alt="Interpolate start reference image."/>
-      </div>
-      <div class="item item-shiba">
-        <img src="./static/images/feature_matching/towel/681-to-691.png"
-                class="interpolation-image"
-                alt="Interpolate start reference image."/>
-      </div>
-      <div class="item item-fullbody">
-        <img src="./static/images/feature_matching/towel/911-to-921.png"
-                class="interpolation-image"
-                alt="Interpolate start reference image."/>
-      </div>
-      <div class="item item-blueshirt">
-        <img src="./static/images/feature_matching/towel/1001-to-1011.png"
-                class="interpolation-image"
-                alt="Interpolate start reference image."/>
-      </div>
-      <div class="item item-mask">
-        <img src="./static/images/feature_matching/towel/1081-to-1091.png"
-                class="interpolation-image"
-                alt="Interpolate start reference image."/>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section class="section">
-  <div class="container">
-    <h2 class="title is-3">Keypoints Detection</h2>
-    <p>
-      In our Real2Sim pipeline, we use existing estimated results to train keypoints detection model. Here we illustrate several detection results.
-      The blue arrow is the predicted z-axis. The green arrow is the predicted x-axis.
-    </p>
-    <h2 class="title is-4">First tie-knotting task</h2>
-    <div id="results-carousel" class="carousel results-carousel">
-      <div class="item item-steve">
-        <img src="./static/images/keypoints/tie1/217.png"
-                class="interpolation-image"
-                alt="Interpolate start reference image."/>
-      </div>
-      <div class="item item-chair-tp">
-        <img src="./static/images/keypoints/tie1/401.png"
-                class="interpolation-image"
-                alt="Interpolate start reference image."/>
-      </div>
-      <div class="item item-shiba">
-        <img src="./static/images/keypoints/tie1/753.png"
-                class="interpolation-image"
-                alt="Interpolate start reference image."/>
-      </div>
-      <div class="item item-fullbody">
-        <img src="./static/images/keypoints/tie1/1201.png"
-                class="interpolation-image"
-                alt="Interpolate start reference image."/>
-      </div>
-      <div class="item item-blueshirt">
-        <img src="./static/images/keypoints/tie1/1441.png"
-                class="interpolation-image"
-                alt="Interpolate start reference image."/>
-      </div>
-      <div class="item item-mask">
-        <img src="./static/images/keypoints/tie1/1553.png"
-                class="interpolation-image"
-                alt="Interpolate start reference image."/>
-      </div>
-    </div>
-
-    <h2 class="title is-4">Second tie-knotting task</h2>
-    <div id="results-carousel" class="carousel results-carousel">
-      <div class="item item-steve">
-        <img src="./static/images/keypoints/tie2/229.png"
-                class="interpolation-image"
-                alt="Interpolate start reference image."/>
-      </div>
-      <div class="item item-chair-tp">
-        <img src="./static/images/keypoints/tie2/487.png"
-                class="interpolation-image"
-                alt="Interpolate start reference image."/>
-      </div>
-      <div class="item item-shiba">
-        <img src="./static/images/keypoints/tie2/1135.png"
-                class="interpolation-image"
-                alt="Interpolate start reference image."/>
-      </div>
-      <div class="item item-fullbody">
-        <img src="./static/images/keypoints/tie2/1489.png"
-                class="interpolation-image"
-                alt="Interpolate start reference image."/>
-      </div>
-      <div class="item item-blueshirt">
-        <img src="./static/images/keypoints/tie2/1669.png"
-                class="interpolation-image"
-                alt="Interpolate start reference image."/>
-      </div>
-      <div class="item item-mask">
-        <img src="./static/images/keypoints/tie2/2137.png"
-                class="interpolation-image"
-                alt="Interpolate start reference image."/>
-      </div>
-      <div class="item item-mask">
-        <img src="./static/images/keypoints/tie2/2365.png"
-                class="interpolation-image"
-                alt="Interpolate start reference image."/>
-      </div>
-    </div>
-
-  </div>
-</section> -->
 
 <section class="section">
   <div class="container is-max-desktop">
