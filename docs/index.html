@@ -30,7 +30,16 @@
       width: auto;
       height: 200px;
       max-height: 200px;
-      border: 1px solid #ccc;
+      border: 0px solid #ccc;
+    }
+    .grid-text {
+      height: 200px;
+      border: 0px solid #ccc;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-weight: bold;
+      font-size: 1.2em;
     }
     .method-title {
       font-weight: bold;
@@ -210,7 +219,6 @@
     <!-- Coarse Prediction -->
     <div class="column">
       <h3 class="title is-4">Coarse Prediction</h3>
-      <!-- <img src="./static/images/coarse_animation-crop.gif" class="interpolation-image" alt="Interpolation end reference image." /> -->
        <video id="coarse" controls autoplay muted loop playsinline height="100%">
         <source src="./static/videos/coarse_animation_crop.mp4"
                 type="video/mp4">
@@ -227,7 +235,6 @@
     <!-- Refinement -->
     <div class="column">
       <h3 class="title is-4">Refinement</h3>
-      <!-- <img src="./static/images/refine_animation-crop.gif" class="interpolation-image" alt="Interpolation end reference image." /> -->
         <video id="refinement" controls autoplay muted loop playsinline height="100%">
           <source src="./static/videos/refine_animation_crop.mp4"
                   type="video/mp4">
@@ -256,7 +263,7 @@
     <!-- Data Generation Setup -->
     <div class="column">
       <h3 class="title is-4">Data Generation Setup</h3>
-      <img src="./static/images/scene illustration.png" class="interpolation-image" alt="Interpolation end reference image." />
+      <img src="./static/images/scene illustration.png" class="interpolation-image" alt="Scene inllustration" />
       <p>
         We build a simple cuboid environment in the SAPIEN simulator with realistic textures and place the object inside to manipulate it.
       </p>
@@ -268,7 +275,7 @@
         We first render multi-view RGBD images of the object at the initial state to generate an object surface point cloud on the right-hand side. 
         Then, to increase the diversity of the video, we place two cameras in front of the moving part of the object to record the interaction videos from two different views.
       </p>
-      <img src="./static/images/data distribution.svg" class="interpolation-image" alt="Interpolation end reference image." />
+      <img src="./static/images/data distribution.svg" class="interpolation-image" alt="IData distribution" />
       <p>
         We finally generate 784 videos of 284 objects across 11 categories. The data distribution across different categories is shown in the bar chart above.
       </p>
@@ -322,12 +329,11 @@
 </section>
 
 <section class="section">
-  <div class="container is-max-desktop">
+  <div class="container">
 
     <h2 class="title is-3">Experiment Results</h2>
     
     <!-- Synthetic Data Results -->
-    <div class="column">
       <h3 class="title is-4">Synthetic Data</h3>
 
       <div class="grid-container grid-5x4">
@@ -355,8 +361,7 @@
         </div>
         <div class="grid-item">
           <div class="method-title">RSRD</div>
-          <!-- <video src="" controls></video> -->
-          <p>failed</p>
+          <img src="./static/images/7265_rsrd.png" class="interpolation-image" alt="RSRD result for microwave" />
         </div>
         <div class="grid-item">
           <div class="method-title">Ours</div>
@@ -450,8 +455,7 @@
           </video>
         </div>
         <div class="grid-item">
-          <!-- <video src="./static/videos/100072/rsrd_motion.mp4" controls></video> -->
-           <p>Failed</p>
+          <div class="grid-text">Failed</div>
         </div>
         <div class="grid-item">
           <video class="grid_video" controls autoplay muted loop playsinline>
@@ -460,12 +464,9 @@
           </video>
         </div>
       </div>
-
-    </div>
     <!--/ Synthetic Data Results -->
 
     <!-- Real Data Results. -->
-    <div class="column">
       <h3 class="title is-4">Real Data</h3>
       <div class="grid-container grid-4x4">
         <!-- Row 1 -->
@@ -485,8 +486,7 @@
         </div>
         <div class="grid-item">
           <div class="method-title">RSRD</div>
-          <!-- <video src="" controls></video> -->
-          <p>failed</p>
+          <div class="grid-text">Failed</div>
         </div>
         <div class="grid-item">
           <div class="method-title">Ours</div>
@@ -536,7 +536,7 @@
           </video>
         </div>
         <div class="grid-item">
-          <p>Failed</p>
+          <div class="grid-text">Failed</div>
         </div>
         <div class="grid-item">
           <video class="grid_video" controls autoplay muted loop playsinline>
@@ -571,7 +571,6 @@
           </video>
         </div>
       </div>
-    </div>
     <!--/ Real Data Results. -->
 
   </div>
