@@ -528,26 +528,6 @@ class CoarsePrediction():
 
                 if dynamic_kp0.shape[0] > 80:
                     result_i = self.estimate_joint_single(dynamic_kp0, dynamic_kp1, RANSAC=True)
-                    if interval == 1 and i == 5:
-                        dynamic_kp0_pcd = o3d.geometry.PointCloud()
-                        dynamic_kp0_pcd.points = o3d.utility.Vector3dVector(dynamic_kp0)
-                        dynamic_kp0_pcd.paint_uniform_color([1, 0, 0])
-                        o3d.io.write_point_cloud(f"dynamic_kp0.ply", dynamic_kp0_pcd)
-                        dynamic_kp1_pcd = o3d.geometry.PointCloud()
-                        dynamic_kp1_pcd.points = o3d.utility.Vector3dVector(dynamic_kp1)
-                        dynamic_kp1_pcd.paint_uniform_color([0, 0, 1])
-                        o3d.io.write_point_cloud(f"dynamic_kp1.ply", dynamic_kp1_pcd)
-                        revolute_angle = self.compute_average_rotation_angle(result_i["revolute"]["X"], result_i["revolute"]["Y"], result_i["revolute"]["axis"], result_i["revolute"]["pos"])
-                        prismatic_distance = self.compute_average_translation_distance(result_i["prismatic"]["X"], result_i["prismatic"]["Y"], result_i["prismatic"]["axis"])
-                        with open("coarse_prediction.txt", "w") as f:
-                            f.write(f"revolute axis: {result_i['revolute']['axis'].tolist()}\n")
-                            f.write(f"revolute pos: {result_i['revolute']['pos'].tolist()}\n")
-                            f.write(f"revolute angle: {revolute_angle}\n")
-                            f.write(f"revolute error: {result_i['revolute']['error']}\n")
-                            f.write(f"prismatic axis: {result_i['prismatic']['axis'].tolist()}\n")
-                            f.write(f"prismatic pos: {result_i['prismatic']['pos'].tolist()}\n")
-                            f.write(f"prismatic distance: {prismatic_distance}\n")
-                            f.write(f"prismatic error: {result_i['prismatic']['error']}\n")
                     result_list.append(result_i)
                     pair_list.append((i, i + interval))
         if len(result_list) > 0:
