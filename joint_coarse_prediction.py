@@ -39,13 +39,13 @@ class CoarsePrediction():
         object2label = precompute_object2label(init_base_pose)
         gt_camera_pose = np.load(self.gt_camera_pose_path)
         self.camera2label = [precompute_camera2label(gt_camera_pose[0], object2label)]
-        
+
         self.gt_camera2label = []
         self.dynamic_mask_list = []
         self.img_list = os.listdir(self.sample_rgb_dir)
         self.img_list.sort()
         if mask_type == "gt":
-            self.moving_part_id = find_movable_part(self.actor_pose_path)
+            self.moving_part_id = find_movable_part(obj_pose_dict)
             for i in range(len(self.img_list)):
                 segment = np.load(f"{self.segment_dir}/{self.img_list[i][:-4]}.npz")['a']
                 dynamic_mask = segment == self.moving_part_id
@@ -111,9 +111,9 @@ class CoarsePrediction():
         for i in range(len(img_list) - 1):
             base_depth = np.load(f"{self.view_dir}/depth/{img_list[i][:-4]}.npz")['a']
             self.H, self.W = base_depth.shape
-            base_pc = depth2xyz(base_depth)
+            base_pc = depth2xyz(base_depth, self.intrinsics)
             next_depth = np.load(f"{self.view_dir}/depth/{img_list[i + 1][:-4]}.npz")['a']
-            next_pc = depth2xyz(next_depth)
+            next_pc = depth2xyz(next_depth, self.intrinsics)
 
             mkpts0, mkpts1, conf = self.compute_match(f"{self.sample_rgb_dir}/{img_list[i]}", f"{self.sample_rgb_dir}/{img_list[i + 1]}")
             match_mask = conf > 0.95

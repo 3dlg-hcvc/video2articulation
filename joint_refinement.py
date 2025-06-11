@@ -20,13 +20,15 @@ import argparse
 import yaml
 from typing import Tuple, List
 
+from utils import set_seed, find_movable_part, precompute_object2label, precompute_camera2label, depth2xyz
+
 
 class BundleAdjustment(torch.nn.Module):
-    def __init__(self, joint_data_dir: str, preprocess_dir: str, prediction_dir: str, opt_view: int, cat: str, mask_type: str, 
-                 joint_type: str, lr: float, loss_func: str, opt_index: List[int], opt_steps: int, log_dir: str, 
+    def __init__(self, joint_data_dir: str, preprocess_dir: str, prediction_dir: str, opt_view: int, mask_type: str, 
+                 joint_type: str, lr: float, loss_func: str, opt_steps: int, log_dir: str, 
                  device: torch.device, seed: int, vis_pcd: bool = False):
         super(BundleAdjustment, self).__init__()
-        self.set_seed(seed)
+        set_seed(seed)
         self.device = device
         # init pc
         self.actor_pose_path = f"{joint_data_dir}/actor_pose.pkl"
@@ -35,7 +37,7 @@ class BundleAdjustment(torch.nn.Module):
         actor_list = []
         for actor_name in obj_pose_dict.keys():
             actor_list.append(int(actor_name[6:]))
-        moving_part_id = self.find_movable_part()
+        moving_part_id = find_movable_part(obj_pose_dict)
         
         surface_dir = f"{joint_data_dir}/view_init"
         surface_img = []
@@ -66,22 +68,17 @@ class BundleAdjustment(torch.nn.Module):
         self.surface_rgb = torch.from_numpy(self.surface_rgb[sample_index]).to(device) # sample_num * 3
         self.surface_xyz = torch.from_numpy(self.surface_xyz[sample_index]).to(device) # sample_num * 3
         self.surface_segment = torch.from_numpy(self.surface_segment[sample_index]).to(device) # sample_num * 1
+        self.surface_dynamic_segment = torch.from_numpy(self.surface_dynamic_segment[sample_index]).to(device) # sample_num * 1
+        self.surface_static_segment = torch.logical_and(self.surface_segment, ~self.surface_dynamic_segment) # sample_num * 1
         
+        self.surface_static_xyz = self.surface_xyz[self.surface_static_segment].to(torch.float64)
+        self.surface_dynamic_xyz = self.surface_xyz[self.surface_dynamic_segment].to(torch.float64)
         self.surface_xyz = self.surface_xyz[self.surface_segment]
         self.surface_rgb = self.surface_rgb[self.surface_segment]
 
         init_base_pose = obj_pose_dict["actor_6"][0]
-        actor_translation = init_base_pose[:3]
-        actor_rotation = torch.from_numpy(R.from_quat(init_base_pose[3:], scalar_first=True).as_matrix())
-        world2object = torch.eye(4, dtype=torch.float64)
-        world2object[:3, :3] = actor_rotation
-        world2object[:3, 3] = torch.from_numpy(actor_translation)
-        object2world = self.inverse_transformation(world2object[None, ...])
-        object2world = object2world[0]
-        world2label_rotation = torch.from_numpy(R.from_euler('zyx', [90, 0, -90], degrees=True).as_matrix())
-        world2label = torch.eye(4, dtype=torch.float64)
-        world2label[:3, :3] = world2label_rotation
-        object2label = torch.matmul(world2label, object2world).to(device)
+        object2label_np = precompute_object2label(init_base_pose)
+        object2label = torch.from_numpy(object2label_np).to(torch.float64).to(device) # 4, 4
         self.surface_xyz = self.surface_xyz.to(torch.float64)
         self.surface_xyz = torch.matmul(self.surface_xyz, object2label[:3, :3].T) + object2label[:3, 3]
         self.surface_static_xyz = torch.matmul(self.surface_static_xyz, object2label[:3, :3].T) + object2label[:3, 3]
@@ -103,24 +100,18 @@ class BundleAdjustment(torch.nn.Module):
             camera_translation = camera_extrinsics[:3, 3]
             camera_rotation = R.from_matrix(camera_extrinsics[:3, :3]).as_quat(scalar_first=True)
             camera_pose.append(torch.from_numpy(np.concatenate([camera_rotation, camera_translation])))
-        if loss_func.startswith("chamfer"):
-            self.camera_pose = torch.nn.Parameter(torch.stack(camera_pose)[opt_index].to(device), requires_grad=True) # N, 7  first 4 quaternion, last 3 translation
-        else:
-            self.camera_pose = torch.nn.Parameter(torch.stack(camera_pose).to(device), requires_grad=True) # full, 7  first 4 quaternion, last 3 translation
+        self.camera_pose = torch.nn.Parameter(torch.stack(camera_pose).to(device), requires_grad=True) # N, 7  first 4 quaternion, last 3 translation
         
         ## joint axis, joint position, and joint state
         self.joint_axis = torch.nn.Parameter(torch.from_numpy(np.load(f"{prediction_dir}/coarse_prediction/{mask_type}/{seed}/{joint_type}/joint_axis.npy")).to(device), requires_grad=True) # 3,
         self.joint_pos = torch.nn.Parameter(torch.from_numpy(np.load(f"{prediction_dir}/coarse_prediction/{mask_type}/{seed}/{joint_type}/joint_pos.npy")).to(device), requires_grad=True) # 3,
-        if loss_func.startswith("chamfer"):
-            self.joint_state = torch.nn.Parameter(torch.from_numpy(np.load(f"{prediction_dir}/coarse_prediction/{mask_type}/{seed}/{joint_type}/joint_value.npy")[opt_index]).to(device), requires_grad=True) # N,
-        else:
-            self.joint_state = torch.nn.Parameter(torch.from_numpy(np.load(f"{prediction_dir}/coarse_prediction/{mask_type}/{seed}/{joint_type}/joint_value.npy")).to(device), requires_grad=True) # full,
+        self.joint_state = torch.nn.Parameter(torch.from_numpy(np.load(f"{prediction_dir}/coarse_prediction/{mask_type}/{seed}/{joint_type}/joint_value.npy")).to(device), requires_grad=True) # N,
         if torch.any(torch.isnan(self.joint_state)):
             del self.joint_state
             if joint_type == "revolute":
-                self.joint_state = torch.nn.Parameter(torch.linspace(0, torch.pi / 2, len(opt_index), device=device), requires_grad=True) # N,
+                self.joint_state = torch.nn.Parameter(torch.linspace(0, torch.pi / 2, self.camera_pose.shape[0], device=device), requires_grad=True) # N,
             elif joint_type == "prismatic":
-                self.joint_state = torch.nn.Parameter(torch.linspace(0, 0.1, len(opt_index), device=device), requires_grad=True) # N,
+                self.joint_state = torch.nn.Parameter(torch.linspace(0, 0.1, self.camera_pose.shape[0], device=device), requires_grad=True) # N,
         self.joint_type = joint_type
         
         ## moving map
@@ -143,20 +134,15 @@ class BundleAdjustment(torch.nn.Module):
                 obj_mask_id = segment == actor_id
                 obj_mask = np.logical_or(obj_mask, obj_mask_id)
             obj_mask_list.append(obj_mask)
-        self.gt_moving_map_bool = torch.stack(gt_moving_map)[opt_index].to(device) # N, H, W
+        self.gt_moving_map_bool = torch.stack(gt_moving_map).to(device) # N, H, W
         # obj mask
-        self.obj_mask_full_bool = torch.from_numpy(np.stack(obj_mask_list)).to(device) # full, H, W
-        self.obj_mask_bool = self.obj_mask_full_bool[opt_index]
-        self.obj_mask_full = torch.from_numpy(np.stack(obj_mask_list)).to(torch.float64).to(device) # full, H, W
-        self.obj_mask = self.obj_mask_full[opt_index]
+        self.obj_mask_bool = torch.from_numpy(np.stack(obj_mask_list)).to(device) # N, H, W
+        self.obj_mask = torch.from_numpy(np.stack(obj_mask_list)).to(torch.float64).to(device) # N, H, W
 
         # video pc
         self.intrinsics = np.load(f"{view_dir}/intrinsics.npy")
         self.intrinsics_torch = torch.from_numpy(self.intrinsics).to(device)
         self.intrinsics_torch = self.intrinsics_torch.to(torch.float64)
-        sample_rgb_index = [int(file_name[:-4]) for file_name in os.listdir(f"{view_dir}/sample_rgb/")]
-        sample_rgb_index.sort()
-        sample_sample_rgb_index = [sample_rgb_index[i] for i in opt_index]
         depth_list = glob.glob(f"{view_dir}/depth/*.npz")
         depth_list.sort()
         xyz = []
@@ -165,14 +151,12 @@ class BundleAdjustment(torch.nn.Module):
         rgb = []
         for i in sample_rgb_index:
             depth = np.load(depth_list[i])['a']
-            xyz.append(self.depth2xyz(depth, self.intrinsics, cat, False)) # in opengl coordinate
+            xyz.append(depth2xyz(depth, self.intrinsics)) # in opengl coordinate
             bgr = cv2.imread(rgb_list[i])
             rgb.append(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
             
-        self.xyz_full = torch.from_numpy(np.stack(xyz)).to(device) # full, H, W, 3
-        self.xyz = self.xyz_full[opt_index] # N, H, W, 3
-        self.rgb_full = torch.from_numpy(np.stack(rgb)).to(device) # full, H, W, 3
-        self.rgb = self.rgb_full[opt_index] # N, H, W, 3
+        self.xyz = torch.from_numpy(np.stack(xyz)).to(device) # N, H, W, 3
+        self.rgb = torch.from_numpy(np.stack(rgb)).to(device) # N, H, W, 3
         N, H, W, C = self.rgb.shape
         # part segments map
         segments_map_list = glob.glob(f"{preprocess_dir}/video_segment_reverse/small/final-output/*.npz")
@@ -184,7 +168,7 @@ class BundleAdjustment(torch.nn.Module):
         non_overlap_segments_list = self.remove_overlay(origin_segments_list)
         initial_segments = non_overlap_segments_list[0]
         self.old_segment_id_list = []
-        initial_obj_mask = self.obj_mask_full_bool[0].cpu().numpy()
+        initial_obj_mask = self.obj_mask_bool[0].cpu().numpy()
         self.part_segments_list = []
         old_part_segments_list = []
         for segment_id in range(initial_segments.shape[0]):
@@ -193,19 +177,18 @@ class BundleAdjustment(torch.nn.Module):
             if np.sum(part_occupation) > 100:
                 self.old_segment_id_list.append(segment_id)
         for frame_id, segments_map in enumerate(segments_map_list):
-            # part_segments = np.load(segments_map)['a'] # old_parts, H, W
             part_segments = non_overlap_segments_list[frame_id]
-            obj_segments = self.obj_mask_full_bool[frame_id].cpu().numpy() # H, W
+            obj_segments = self.obj_mask_bool[frame_id].cpu().numpy() # H, W
             part_segments = np.logical_and(part_segments[self.old_segment_id_list], obj_segments[np.newaxis, ...])
             self.part_segments_list.append(part_segments) # old_parts, H, W
             old_part_segments = np.zeros_like(obj_segments, dtype=np.bool_)
             for part_id in range(part_segments.shape[0]):
                 old_part_segments = np.logical_or(old_part_segments, part_segments[part_id])
             old_part_segments_list.append(torch.from_numpy(old_part_segments).to(self.device)) # H, W
-        self.old_part_segments_list = torch.stack(old_part_segments_list).to(self.device) # full, H, W
+        self.old_part_segments_list = torch.stack(old_part_segments_list).to(self.device) # N, H, W
 
-        part_segments_full = np.stack(self.part_segments_list) # numpy full, old_parts, H, W
-        self.part_segments_full = torch.from_numpy(np.stack(self.part_segments_list)).to(torch.float64).to(self.device) # full, old_parts, H, W
+        part_segments_full = np.stack(self.part_segments_list) # numpy N, old_parts, H, W
+        self.part_segments_full = torch.from_numpy(part_segments_full).to(torch.float64).to(self.device) # N, old_parts, H, W
 
         if mask_type == "monst3r":
             moving_map_list = glob.glob(f"{preprocess_dir}/monst3r/dynamic_mask_*.png")
@@ -240,10 +223,14 @@ class BundleAdjustment(torch.nn.Module):
         self.mask_type = mask_type
         self.vis_pcd = vis_pcd
         
-        self.gt_camera_se3_full = self.precompute_camera2label(view_dir) # numpy
-        self.gt_camera_se3 = self.gt_camera_se3_full[sample_sample_rgb_index] # numpy N, 4, 4
+        gt_camera_pose = np.load(f"{view_dir}/camera_pose.npy")
+        self.gt_camera_se3 = []
+        for i in sample_rgb_index:
+            gt_camera_se3_i= precompute_camera2label(gt_camera_pose[i], object2label_np)
+            self.gt_camera_se3.append(gt_camera_se3_i)
+        self.gt_camera_se3 = np.stack(self.gt_camera_se3) # numpy N, 4, 4
 
-        self.lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, opt_steps * self.round)
+        self.lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, opt_steps)
 
         self.train = True
         self.best_joint_axis = self.joint_axis.detach().cpu().numpy()
@@ -255,14 +242,6 @@ class BundleAdjustment(torch.nn.Module):
         self.log_dir = f"{log_dir}/{loss_func}/{seed}/{self.joint_type}"
         if not os.path.exists(self.log_dir):
             os.makedirs(self.log_dir)
-
-
-    def set_seed(self, seed: int):
-        torch.manual_seed(0)
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
-        np.random.seed(seed)
-        random.seed(seed)
 
 
     def dump_configuration(self,):
@@ -311,120 +290,6 @@ class BundleAdjustment(torch.nn.Module):
                 padding_new_segments = np.vstack([full_new_segments[frame_id], padding_matrix])
                 full_new_segments[frame_id] = padding_new_segments
         return full_new_segments
-
-
-    def find_movable_part(self,) -> int:
-        with open(self.actor_pose_path, 'rb') as f:
-            actor_pose_dict = pickle.load(f)
-        moving_part_id = -1
-        max_diff = -1
-        for actor in actor_pose_dict.keys():
-            init_pose = actor_pose_dict[actor][0]
-            end_pose = actor_pose_dict[actor][-1]
-            diff = np.linalg.norm(end_pose - init_pose)
-            if max_diff < diff:
-                moving_part_id = int(actor[6:])
-                max_diff = diff
-
-        return moving_part_id
-    
-
-    def depth2xyz(self, depth_image: np.ndarray, intrinsic_matrix: np.ndarray, cat: str, flow: bool) -> np.ndarray:
-        # Get the shape of the depth image
-        H, W = depth_image.shape
-
-        # Create meshgrid for pixel coordinates (u, v)
-        u, v = np.meshgrid(np.arange(W), np.arange(H))
-
-        # Flatten the grid to a 1D array of pixel coordinates
-        u = u.flatten()
-        v = v.flatten()
-
-        # Flatten the depth image to a 1D array of depth values
-        if cat in ["USB", "Scissors", "Table"]:
-            depth = depth_image.flatten()
-        else:
-            depth = depth_image.flatten() / 1000.0
-
-        # Camera intrinsic matrix (3x3)
-        fx, fy = intrinsic_matrix[0, 0], intrinsic_matrix[1, 1]
-        cx, cy = intrinsic_matrix[0, 2], intrinsic_matrix[1, 2]
-
-        # Calculate the 3D coordinates (x, y, z) from depth
-        # Use the formula:
-        #   X = (u - cx) * depth / fx
-        #   Y = (v - cy) * depth / fy
-        #   Z = depth
-        x = (u - cx) * depth / fx
-        y = (v - cy) * depth / fy
-        z = depth
-
-        # Stack the x, y, z values into a 3D point cloud
-        point_cloud = np.vstack((x, y, z)).T
-
-        if not flow:
-            point_cloud = point_cloud * np.array([1, -1, -1])
-
-        # Reshape the point cloud to the original depth image shape [H, W, 3]
-        point_cloud = point_cloud.reshape(H, W, 3)
-
-        return point_cloud
-
-
-    def precompute_camera2label(self, view_dir: str) -> np.ndarray:
-        with open(self.actor_pose_path, 'rb') as f:
-            obj_pose_dict = pickle.load(f)
-        init_base_pose = obj_pose_dict["actor_6"][0]
-        actor_translation = init_base_pose[:3]
-        actor_rotation = R.from_quat(init_base_pose[3:], scalar_first=True).as_matrix()
-        object2world = np.eye(4)
-        object2world[:3, :3] = actor_rotation.T
-        object2world[:3, 3] = -np.dot(actor_rotation.T, actor_translation)
-
-        world2label_rotation = R.from_euler('zyx', [90, 0, -90], degrees=True).as_matrix()
-        world2label = np.eye(4)
-        world2label[:3, :3] = world2label_rotation
-
-        camera_pose = np.load(f"{view_dir}/camera_pose.npy")
-        camera_pose_list = []
-        for i in range(camera_pose.shape[0]):
-            camera2object_rotation = R.from_quat(camera_pose[i, 3:], scalar_first=True).as_matrix()
-            camera2object_translation = camera_pose[i, :3]
-            camera2object_rotation = camera2object_rotation[:, [1, 2, 0]] * [[-1, 1, -1]]
-            camera2object = np.eye(4)
-            camera2object[:3, :3] = camera2object_rotation
-            camera2object[:3, 3] = camera2object_translation
-            camera2world = np.dot(object2world, camera2object)
-            camera2label = np.dot(world2label, camera2world)
-            camera_pose_list.append(camera2label)
-        gt_camera_se3 = np.stack(camera_pose_list)
-        return gt_camera_se3
-
-
-    def inverse_transformation(self, T: torch.Tensor) -> torch.Tensor:
-        """
-        Compute the inverse of an SE(3) transformation matrix.
-
-        Parameters:
-            T (torch.Tensor): Nx4x4 transformation matrix.
-
-        Returns:
-            torch.Tensor: Inverse of the transformation matrix.
-        """
-        # Extract the rotation matrix (R) and translation vector (t)
-        R = T[:, :3, :3]
-        t = T[:, :3, [3]]
-
-        # Compute the inverse
-        R_inv = R.permute(0, 2, 1)  # Transpose of the rotation matrix
-        t_inv = -torch.matmul(R_inv, t)  # Negated product of R_inv and t # N, 3, 1
-
-        # Construct the inverse transformation matrix
-        T_inv = torch.eye(4, dtype=torch.float64).repeat(R_inv.shape[0], 1, 1).to(R_inv.device)
-        T_inv[:, :3, :3] = R_inv
-        T_inv[:, :3, 3] = t_inv[:, :, 0]
-
-        return T_inv
     
 
     def chamfer_loss(self,) -> torch.Tensor:
@@ -759,8 +624,6 @@ if __name__ == "__main__":
     gt_joint_type = joint_type_map[interaction_dict["type"]]
     sample_rgb_index = [int(file_name[:-4]) for file_name in os.listdir(f"{joint_data_dir}/view_{opt_view}/sample_rgb/")]
     sample_rgb_index.sort()
-    opt_index = [j for j in range(len(sample_rgb_index))]
-    sample_rgb_index = [sample_rgb_index[i] for i in opt_index]
     gt_joint_value = np.load(f"{joint_data_dir}/gt_joint_value.npy")
     sample_gt_joint_value = gt_joint_value[sample_rgb_index]
 
@@ -784,8 +647,8 @@ if __name__ == "__main__":
     with wandb.init(project=f"video_articulation_{args.exp_name}_{mask_type}", \
                     config=run_config, dir=f"{log_dir}/{loss_func}/{args.seed}/{args.joint}", \
                     name=f"{view_dir}/{args.joint}/seed{args.seed}/"):
-        ba = BundleAdjustment(joint_data_dir, preprocess_dir, prediction_dir, opt_view, cat, mask_type, args.joint, 
-                              args.lr, loss_func, opt_index, opt_steps, log_dir, device, args.seed, args.vis)
+        ba = BundleAdjustment(joint_data_dir, preprocess_dir, prediction_dir, opt_view, mask_type, args.joint, 
+                              args.lr, loss_func, opt_steps, log_dir, device, args.seed, args.vis)
         wandb.watch(ba, log="all", log_freq=1)
         if not ba.valid:
             print("predict error")
