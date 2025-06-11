@@ -1,17 +1,12 @@
 import numpy as np
 import torch
-from torch.autograd import Variable
 import torch.nn.functional as F
 import cv2
-import open3d as o3d
 from PIL import Image
-import math
 from pytorch3d.loss import chamfer_distance
 from pytorch3d.transforms import axis_angle_to_matrix, quaternion_to_matrix
 from scipy.spatial.transform import Rotation as R
 import wandb
-from scipy.ndimage import zoom
-import matplotlib.pyplot as plt
 
 import random
 import pickle

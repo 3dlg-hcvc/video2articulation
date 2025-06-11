@@ -6,8 +6,6 @@ from kornia.feature import LoFTR
 from PIL import Image
 import cv2
 import torch
-import json, yaml
-import openpyxl
 import argparse
 import random
 import os
@@ -639,7 +637,6 @@ class CoarsePrediction():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--exp_name", type=str, required=True)
     parser.add_argument("--view_dir", type=str, required=True)
     parser.add_argument("--mask_type", type=str, choices=["gt", "monst3r"], required=True)
     parser.add_argument("--seed", type=int, default=0)
