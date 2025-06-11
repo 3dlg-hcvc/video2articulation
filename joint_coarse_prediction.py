@@ -7,10 +7,11 @@ import torch
 import argparse
 import os
 import glob
+import pickle
 from tqdm import tqdm
 from typing import Tuple, List, Dict
 
-from utils import set_seed, depth2xyz, find_movable_part, precompute_camera2label, estimate_se3_transformation
+from utils import set_seed, depth2xyz, find_movable_part, precompute_camera2label, precompute_object2label, estimate_se3_transformation
 
 
 class CoarsePrediction():
@@ -32,7 +33,13 @@ class CoarsePrediction():
 
         self.H = 480
         self.W = 640
-        self.camera2label = [precompute_camera2label(self.gt_camera_pose_path, self.actor_pose_path)]
+        with open(self.actor_pose_path, 'rb') as f:
+            obj_pose_dict = pickle.load(f)
+        init_base_pose = obj_pose_dict["actor_6"][0]
+        object2label = precompute_object2label(init_base_pose)
+        gt_camera_pose = np.load(self.gt_camera_pose_path)
+        self.camera2label = [precompute_camera2label(gt_camera_pose[0], object2label)]
+        
         self.gt_camera2label = []
         self.dynamic_mask_list = []
         self.img_list = os.listdir(self.sample_rgb_dir)
@@ -43,12 +50,12 @@ class CoarsePrediction():
                 segment = np.load(f"{self.segment_dir}/{self.img_list[i][:-4]}.npz")['a']
                 dynamic_mask = segment == self.moving_part_id
                 self.dynamic_mask_list.append(dynamic_mask)
-                self.gt_camera2label.append(precompute_camera2label(self.gt_camera_pose_path, self.actor_pose_path, int(self.img_list[i][:-4])))
+                self.gt_camera2label.append(precompute_camera2label(gt_camera_pose[int(self.img_list[i][:-4])], object2label))
         else:
             for i in range(len(self.img_list)):
                 dynamic_mask = self.load_monst3r_mask(f"{self.monst3r_dir}/dynamic_mask_{i}.png")
                 self.dynamic_mask_list.append(dynamic_mask)
-                self.gt_camera2label.append(precompute_camera2label(self.gt_camera_pose_path, self.actor_pose_path, int(self.img_list[i][:-4])))
+                self.gt_camera2label.append(precompute_camera2label(gt_camera_pose[int(self.img_list[i][:-4])], object2label))
         self.gt_camera_se3 = np.stack(self.gt_camera2label)
         self.prediction_joint_metrics = None
         self.prediction_joint_type = None

@@ -5,6 +5,8 @@ from scipy.spatial.transform import Rotation as R
 import pickle
 import random
 
+from typing import Dict
+
 
 def set_seed(seed: int):
     torch.manual_seed(0)
@@ -125,9 +127,7 @@ def estimate_se3_transformation(target_xyz: np.ndarray, source_xyz: np.ndarray) 
     return source2target
 
 
-def find_movable_part(actor_pose_path: str) -> int:
-    with open(actor_pose_path, 'rb') as f:
-        actor_pose_dict = pickle.load(f)
+def find_movable_part(actor_pose_dict: Dict[str, np.ndarray]) -> int:
     moving_part_id = -1
     max_diff = -1
     for actor in actor_pose_dict.keys():
@@ -141,25 +141,19 @@ def find_movable_part(actor_pose_path: str) -> int:
     return moving_part_id
 
 
-def precompute_camera2label(gt_camera_pose_path: str, actor_pose_path: str, index: int = 0) -> np.ndarray:
-    camera_pose = np.load(gt_camera_pose_path)
-    camera2object_rotation = R.from_quat(camera_pose[index, 3:], scalar_first=True).as_matrix()
-    camera2object_translation = camera_pose[index, :3]
+def precompute_camera2label(camera_pose: np.ndarray, object2label: np.ndarray) -> np.ndarray:
+    camera2object_rotation = R.from_quat(camera_pose[3:], scalar_first=True).as_matrix()
+    camera2object_translation = camera_pose[:3]
     camera2object_rotation = camera2object_rotation[:, [1, 2, 0]] * [[-1, 1, -1]]
     camera2object = np.eye(4)
     camera2object[:3, :3] = camera2object_rotation
     camera2object[:3, 3] = camera2object_translation
 
-    object2label = precompute_object2label(actor_pose_path)
-
     camera2label = np.dot(object2label, camera2object)
     return camera2label
 
 
-def precompute_object2label(actor_pose_path: str) -> np.ndarray:
-    with open(actor_pose_path, 'rb') as f:
-        obj_pose_dict = pickle.load(f)
-    init_base_pose = obj_pose_dict["actor_6"][0]
+def precompute_object2label(init_base_pose: np.ndarray) -> np.ndarray:
     actor_translation = init_base_pose[:3]
     actor_rotation = R.from_quat(init_base_pose[3:], scalar_first=True).as_matrix()
     origin2object = np.eye(4)
