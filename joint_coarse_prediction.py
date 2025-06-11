@@ -1,13 +1,10 @@
 import numpy as np
-import pickle
-import open3d as o3d
 from scipy.spatial.transform import Rotation as R
 from kornia.feature import LoFTR
 from PIL import Image
 import cv2
 import torch
 import argparse
-import random
 import os
 import glob
 from tqdm import tqdm
@@ -140,7 +137,7 @@ class CoarsePrediction():
         return pc_list
     
 
-    def estimate_joint_revolute(self, base_kp: np.ndarray, curr_kp: np.ndarray, RANSAC: bool) -> Tuple[np.ndarray, np.ndarray]:
+    def estimate_joint_transformation(self, base_kp: np.ndarray, curr_kp: np.ndarray, type: str, RANSAC: bool) -> Tuple[np.ndarray, np.ndarray]:
         curr2base = None
         inlier = None
         if RANSAC:
@@ -157,8 +154,13 @@ class CoarsePrediction():
                 init_sample = np.random.choice(base_kp.shape[0], 10, replace=False)
                 init_kp1 = base_kp[init_sample]
                 init_kp2 = curr_kp[init_sample]
-
-                se3 = estimate_se3_transformation(init_kp1, init_kp2)
+                
+                if type == "revolute":
+                    se3 = estimate_se3_transformation(init_kp1, init_kp2)
+                elif type == "prismatic":
+                    only_translation = np.mean((init_kp1 - init_kp2), axis=0)
+                    source2target = np.eye(4)
+                    source2target[:3, 3] = only_translation
                 se3_list.append(se3)
                 rotation = se3[:3, :3]
                 translation = se3[:3, 3]
@@ -169,7 +171,12 @@ class CoarsePrediction():
                 inlier_list.append(inlier.shape[0])
                 inlier_index_list.append(inlier)
                 if inlier.shape[0] > d:
-                    se3 = estimate_se3_transformation(base_kp[inlier], curr_kp[inlier])
+                    if type == "revolute":
+                        se3 = estimate_se3_transformation(base_kp[inlier], curr_kp[inlier])
+                    elif type == "prismatic":
+                        only_translation = np.mean((base_kp[inlier] - curr_kp[inlier]), axis=0)
+                        se3 = np.eye(4)
+                        se3[:3, 3] = only_translation
                     se3_list[-1] = se3
                     rotation = se3[:3, :3]
                     translation = se3[:3, 3]
@@ -190,64 +197,18 @@ class CoarsePrediction():
             curr2base = best_se3
             inlier = best_inlier
         else:
-            curr2base = estimate_se3_transformation(base_kp, curr_kp)
+            if type == "revolute":
+                curr2base = estimate_se3_transformation(base_kp, curr_kp)
+            elif type == "prismatic":
+                only_translation = np.mean((base_kp - curr_kp), axis=0)
+                curr2base = np.eye(4)
+                curr2base[:3, 3] = only_translation
             inlier = np.arange(base_kp.shape[0])
         return curr2base, inlier
 
 
-    def estimate_joint_prismatic(self, base_kp: np.ndarray, curr_kp: np.ndarray, RANSAC: bool) -> Tuple[np.ndarray, np.ndarray]:
-        curr2base_translation = None
-        inlier = None
-        if RANSAC:
-            k = 50
-            inlier_thresh = 1e-2
-            d = int(base_kp.shape[0] * 0.4)
-            best_translation = None
-            best_error = 10000
-            best_inlier = None
-            inlier_list = []
-            translation_list = []
-            inlier_index_list = []
-            for _ in range(k):
-                init_sample = np.random.choice(base_kp.shape[0], 10, replace=False)
-                init_kp1 = base_kp[init_sample]
-                init_kp2 = curr_kp[init_sample]
-
-                only_translation = np.mean((init_kp1 - init_kp2), axis=0)
-                translation_list.append(only_translation)
-
-                transform_kp2 = curr_kp + only_translation
-                dist = np.linalg.norm((base_kp - transform_kp2), axis=1)
-                inlier = np.nonzero(dist < inlier_thresh)[0]
-                inlier_list.append(inlier.shape[0])
-                inlier_index_list.append(inlier)
-                if inlier.shape[0] > d:
-                    only_translation = np.mean((base_kp[inlier] - curr_kp[inlier]), axis=0)
-                    translation_list[-1] = only_translation
-
-                    transform_inlier_kp2 = curr_kp[inlier] + only_translation
-                    this_error = np.mean((base_kp[inlier] - transform_inlier_kp2) ** 2)
-                    if this_error < best_error:
-                        best_translation = only_translation
-                        best_error = this_error
-                        best_inlier = inlier
-            if best_translation is None:
-                print("RANSAC fail!")
-                max_inlier_index = inlier_list.index(max(inlier_list))
-                best_translation = translation_list[max_inlier_index]
-                best_inlier = inlier_index_list[max_inlier_index]
-            else:
-                print("RANSAC success!")
-            curr2base_translation = best_translation
-            inlier = best_inlier
-        else:
-            curr2base_translation = np.mean((base_kp - curr_kp), axis=0)
-            inlier = np.arange(base_kp.shape[0])
-        return curr2base_translation, inlier
-
-
     def estimate_joint_single(self, base_kp: np.ndarray, curr_kp: np.ndarray, RANSAC: bool = False) -> Dict[str, Dict[str, np.ndarray]]:
-        curr2base, revolute_inlier = self.estimate_joint_revolute(base_kp, curr_kp, RANSAC)
+        curr2base, revolute_inlier = self.estimate_joint_transformation(base_kp, curr_kp, "revolute", RANSAC)
         rotation = curr2base[:3, :3]
         translation = curr2base[:3, 3]
 
@@ -270,7 +231,8 @@ class CoarsePrediction():
         rotation_error = np.mean((base_kp[revolute_inlier] - rotate_curr_kp) ** 2)
         result["revolute"] = {"X": curr_kp[revolute_inlier], "Y": base_kp[revolute_inlier], "axis": revolute_joint_axis, "pos": revolute_joint_pos, "error": rotation_error, "det": det,  "valid": valid}
 
-        only_translation, prismatic_inlier = self.estimate_joint_prismatic(base_kp, curr_kp, RANSAC)
+        only_translation_se3, prismatic_inlier = self.estimate_joint_transformation(base_kp, curr_kp, "prismatic", RANSAC)
+        only_translation = only_translation_se3[:3, 3]
         prismatic_joint_axis = only_translation / np.linalg.norm(only_translation)
         prismatic_joint_pos = base_kp[0]
         translate_curr_kp = curr_kp[prismatic_inlier] + only_translation
