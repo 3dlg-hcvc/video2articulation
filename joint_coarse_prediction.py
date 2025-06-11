@@ -13,6 +13,8 @@ import glob
 from tqdm import tqdm
 from typing import Tuple, List, Dict
 
+from utils import set_seed, depth2xyz, find_movable_part, precompute_camera2label, estimate_se3_transformation
+
 
 class CoarsePrediction():
     def __init__(self, view_dir: str, preprocess_dir: str, prediction_dir: str, mask_type: str, device: torch.device, seed: int = 0):
@@ -24,6 +26,7 @@ class CoarsePrediction():
         self.monst3r_dir = f"{preprocess_dir}/monst3r"
         self.prediction_dir = prediction_dir
         self.actor_pose_path = f"{view_dir[:-7]}/actor_pose.pkl"
+        self.gt_camera_pose_path = f"{view_dir}/camera_pose.npy"
         self.intrinsics = np.load(f"{view_dir}/intrinsics.npy")
         self.mask_type = mask_type
         self.device = device
@@ -32,121 +35,28 @@ class CoarsePrediction():
 
         self.H = 480
         self.W = 640
-        self.camera2label = [self.precompute_camera2label()]
+        self.camera2label = [precompute_camera2label(self.gt_camera_pose_path, self.actor_pose_path)]
         self.gt_camera2label = []
         self.dynamic_mask_list = []
         self.img_list = os.listdir(self.sample_rgb_dir)
         self.img_list.sort()
         if mask_type == "gt":
-            self.moving_part_id = self.find_movable_part()
+            self.moving_part_id = find_movable_part(self.actor_pose_path)
             for i in range(len(self.img_list)):
                 segment = np.load(f"{self.segment_dir}/{self.img_list[i][:-4]}.npz")['a']
                 dynamic_mask = segment == self.moving_part_id
                 self.dynamic_mask_list.append(dynamic_mask)
-                self.gt_camera2label.append(self.precompute_camera2label(int(self.img_list[i][:-4])))
+                self.gt_camera2label.append(precompute_camera2label(self.gt_camera_pose_path, self.actor_pose_path, int(self.img_list[i][:-4])))
         else:
             for i in range(len(self.img_list)):
                 dynamic_mask = self.load_monst3r_mask(f"{self.monst3r_dir}/dynamic_mask_{i}.png")
                 self.dynamic_mask_list.append(dynamic_mask)
-                self.gt_camera2label.append(self.precompute_camera2label(int(self.img_list[i][:-4])))
+                self.gt_camera2label.append(precompute_camera2label(self.gt_camera_pose_path, self.actor_pose_path, int(self.img_list[i][:-4])))
         self.gt_camera_se3 = np.stack(self.gt_camera2label)
         self.prediction_joint_metrics = None
         self.prediction_joint_type = None
         self.seed = seed
-        self.set_seed(seed)
-
-
-    def set_seed(self, seed: int):
-        torch.manual_seed(0)
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
-        np.random.seed(seed)
-        random.seed(seed)
-
-
-    def inverse_transformation(self, T: np.ndarray) -> np.ndarray:
-        """
-        Compute the inverse of an SE(3) transformation matrix.
-
-        Parameters:
-            T (numpy.ndarray): 4x4 transformation matrix.
-
-        Returns:
-            numpy.ndarray: Inverse of the transformation matrix.
-        """
-        # Extract the rotation matrix (R) and translation vector (t)
-        R = T[:3, :3]
-        t = T[:3, 3]
-
-        # Compute the inverse
-        R_inv = R.T  # Transpose of the rotation matrix
-        t_inv = -np.dot(R_inv, t)  # Negated product of R_inv and t
-
-        # Construct the inverse transformation matrix
-        T_inv = np.eye(4)
-        T_inv[:3, :3] = R_inv
-        T_inv[:3, 3] = t_inv
-
-        return T_inv
-
-
-    def depth2xyz(self, depth_image: np.ndarray) -> np.ndarray:
-        # Get the shape of the depth image
-        H, W = depth_image.shape
-
-        # Create meshgrid for pixel coordinates (u, v)
-        u, v = np.meshgrid(np.arange(W), np.arange(H))
-
-        # Flatten the grid to a 1D array of pixel coordinates
-        u = u.flatten()
-        v = v.flatten()
-
-        # Flatten the depth image to a 1D array of depth values
-        if self.cat in ["USB", "Scissors", "Table"]:
-            depth = depth_image.flatten()
-        else:
-            depth = depth_image.flatten() / 1000.0
-
-        # Camera intrinsic matrix (3x3)
-        fx, fy = self.intrinsics[0, 0], self.intrinsics[1, 1]
-        cx, cy = self.intrinsics[0, 2], self.intrinsics[1, 2]
-
-        # Calculate the 3D coordinates (x, y, z) from depth
-        # Use the formula:
-        #   X = (u - cx) * depth / fx
-        #   Y = (v - cy) * depth / fy
-        #   Z = depth
-        x = (u - cx) * depth / fx
-        y = (v - cy) * depth / fy
-        z = depth
-
-        # Stack the x, y, z values into a 3D point cloud
-        point_cloud = np.vstack((x, y, z)).T
-
-        point_cloud = point_cloud * np.array([1, -1, -1])
-
-        # Reshape the point cloud to the original depth image shape [H, W, 3]
-        point_cloud = point_cloud.reshape(H, W, 3)
-
-        return point_cloud
-
-
-    def find_movable_part(self,) -> int:
-        with open(self.actor_pose_path, 'rb') as f:
-            actor_pose_dict = pickle.load(f)
-        # find_moving_part = False
-        moving_part_id = -1
-        max_diff = -1
-        for actor in actor_pose_dict.keys():
-            init_pose = actor_pose_dict[actor][0]
-            end_pose = actor_pose_dict[actor][-1]
-            diff = np.linalg.norm(end_pose - init_pose)
-            if max_diff < diff:
-                moving_part_id = int(actor[6:])
-                max_diff = diff
-
-        # assert find_moving_part, "fail to find moving part"
-        return moving_part_id
+        set_seed(seed)
 
 
     def filter_match(self, kp1: np.ndarray, kp2: np.ndarray, thresh: float = 0.3) -> Tuple[np.ndarray, np.ndarray]:
@@ -171,34 +81,6 @@ class CoarsePrediction():
         mkpts1 = correspondences_dict['keypoints1'].cpu().numpy()
         mconf = correspondences_dict['confidence'].cpu().numpy()
         return mkpts0, mkpts1, mconf
-
-
-    def precompute_camera2label(self, index: int = 0) -> np.ndarray:
-        camera_pose = np.load(f"{self.view_dir}/camera_pose.npy")
-        camera2object_rotation = R.from_quat(camera_pose[index, 3:], scalar_first=True).as_matrix()
-        camera2object_translation = camera_pose[index, :3]
-        camera2object_rotation = camera2object_rotation[:, [1, 2, 0]] * [[-1, 1, -1]]
-        camera2object = np.eye(4)
-        camera2object[:3, :3] = camera2object_rotation
-        camera2object[:3, 3] = camera2object_translation
-
-        with open(self.actor_pose_path, 'rb') as f:
-            obj_pose_dict = pickle.load(f)
-        init_base_pose = obj_pose_dict["actor_6"][0]
-        actor_translation = init_base_pose[:3]
-        actor_rotation = R.from_quat(init_base_pose[3:], scalar_first=True).as_matrix()
-        world2object = np.eye(4)
-        world2object[:3, :3] = actor_rotation
-        world2object[:3, 3] = actor_translation
-        object2world = self.inverse_transformation(world2object)
-
-        world2label_rotation = R.from_euler('zyx', [90, 0, -90], degrees=True).as_matrix()
-        world2label = np.eye(4)
-        world2label[:3, :3] = world2label_rotation
-
-        camera2world = np.dot(object2world, camera2object)
-        camera2label = np.dot(world2label, camera2world)
-        return camera2label
     
 
     def load_monst3r_mask(self, mask_path: str) -> np.ndarray:
@@ -209,22 +91,10 @@ class CoarsePrediction():
         return pred_mask
 
 
-    def estimate_se3_transformation(self, init_world_xyz: np.ndarray, init_camera_xyz: np.ndarray) -> np.ndarray:
-        source_pcd = o3d.geometry.PointCloud()
-        source_pcd.points = o3d.utility.Vector3dVector(init_camera_xyz)
-        target_pcd = o3d.geometry.PointCloud()
-        target_pcd.points = o3d.utility.Vector3dVector(init_world_xyz)
-        correspondences = np.arange(init_camera_xyz.shape[0])
-        correspondences = np.vstack([correspondences, correspondences], dtype=np.int32).T
-        p2p_registration = o3d.pipelines.registration.TransformationEstimationPointToPoint(with_scaling=False)
-        camera2world = p2p_registration.compute_transformation(source_pcd, target_pcd, o3d.utility.Vector2iVector(correspondences))
-        return camera2world
-
-
     def align_pc(self, curr_pc: np.ndarray, base_kp: np.ndarray, curr_kp: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         H = curr_pc.shape[0]
         W = curr_pc.shape[1]
-        curr2base = self.estimate_se3_transformation(base_kp, curr_kp)
+        curr2base = estimate_se3_transformation(base_kp, curr_kp)
         rotation = curr2base[:3, :3]
         translation = curr2base[:3, 3]
         align_curr_pc = (rotation @ curr_pc.reshape(-1, 3).T).T + translation.reshape(1, 3)
@@ -237,9 +107,9 @@ class CoarsePrediction():
         for i in range(len(img_list) - 1):
             base_depth = np.load(f"{self.view_dir}/depth/{img_list[i][:-4]}.npz")['a']
             self.H, self.W = base_depth.shape
-            base_pc = self.depth2xyz(base_depth)
+            base_pc = depth2xyz(base_depth)
             next_depth = np.load(f"{self.view_dir}/depth/{img_list[i + 1][:-4]}.npz")['a']
-            next_pc = self.depth2xyz(next_depth)
+            next_pc = depth2xyz(next_depth)
 
             mkpts0, mkpts1, conf = self.compute_match(f"{self.sample_rgb_dir}/{img_list[i]}", f"{self.sample_rgb_dir}/{img_list[i + 1]}")
             match_mask = conf > 0.95
@@ -288,7 +158,7 @@ class CoarsePrediction():
                 init_kp1 = base_kp[init_sample]
                 init_kp2 = curr_kp[init_sample]
 
-                se3 = self.estimate_se3_transformation(init_kp1, init_kp2)
+                se3 = estimate_se3_transformation(init_kp1, init_kp2)
                 se3_list.append(se3)
                 rotation = se3[:3, :3]
                 translation = se3[:3, 3]
@@ -299,7 +169,7 @@ class CoarsePrediction():
                 inlier_list.append(inlier.shape[0])
                 inlier_index_list.append(inlier)
                 if inlier.shape[0] > d:
-                    se3 = self.estimate_se3_transformation(base_kp[inlier], curr_kp[inlier])
+                    se3 = estimate_se3_transformation(base_kp[inlier], curr_kp[inlier])
                     se3_list[-1] = se3
                     rotation = se3[:3, :3]
                     translation = se3[:3, 3]
@@ -320,7 +190,7 @@ class CoarsePrediction():
             curr2base = best_se3
             inlier = best_inlier
         else:
-            curr2base = self.estimate_se3_transformation(base_kp, curr_kp)
+            curr2base = estimate_se3_transformation(base_kp, curr_kp)
             inlier = np.arange(base_kp.shape[0])
         return curr2base, inlier
 
@@ -528,26 +398,6 @@ class CoarsePrediction():
 
                 if dynamic_kp0.shape[0] > 80:
                     result_i = self.estimate_joint_single(dynamic_kp0, dynamic_kp1, RANSAC=True)
-                    if interval == 1 and i == 5:
-                        dynamic_kp0_pcd = o3d.geometry.PointCloud()
-                        dynamic_kp0_pcd.points = o3d.utility.Vector3dVector(dynamic_kp0)
-                        dynamic_kp0_pcd.paint_uniform_color([1, 0, 0])
-                        o3d.io.write_point_cloud(f"dynamic_kp0.ply", dynamic_kp0_pcd)
-                        dynamic_kp1_pcd = o3d.geometry.PointCloud()
-                        dynamic_kp1_pcd.points = o3d.utility.Vector3dVector(dynamic_kp1)
-                        dynamic_kp1_pcd.paint_uniform_color([0, 0, 1])
-                        o3d.io.write_point_cloud(f"dynamic_kp1.ply", dynamic_kp1_pcd)
-                        revolute_angle = self.compute_average_rotation_angle(result_i["revolute"]["X"], result_i["revolute"]["Y"], result_i["revolute"]["axis"], result_i["revolute"]["pos"])
-                        prismatic_distance = self.compute_average_translation_distance(result_i["prismatic"]["X"], result_i["prismatic"]["Y"], result_i["prismatic"]["axis"])
-                        with open("coarse_prediction.txt", "w") as f:
-                            f.write(f"revolute axis: {result_i['revolute']['axis'].tolist()}\n")
-                            f.write(f"revolute pos: {result_i['revolute']['pos'].tolist()}\n")
-                            f.write(f"revolute angle: {revolute_angle}\n")
-                            f.write(f"revolute error: {result_i['revolute']['error']}\n")
-                            f.write(f"prismatic axis: {result_i['prismatic']['axis'].tolist()}\n")
-                            f.write(f"prismatic pos: {result_i['prismatic']['pos'].tolist()}\n")
-                            f.write(f"prismatic distance: {prismatic_distance}\n")
-                            f.write(f"prismatic error: {result_i['prismatic']['error']}\n")
                     result_list.append(result_i)
                     pair_list.append((i, i + interval))
         if len(result_list) > 0:
