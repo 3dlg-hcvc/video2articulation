@@ -63,7 +63,14 @@ The second stage is refinement. Our refinement module attempts to optimize joint
 ```bash
 python launch_joint_refinement.py --exp_name refinement --view_dir sim_data/partnet_mobility/Microwave/7265/joint_0_bg/view_0/ --mask_type monst3r --loss chamfer
 ```
-Results are saved inside `sim_data.exp_results/prediction/` folder as well. You can add `--vis` option to visualize results in wandb panel during optimization. But please this visualization occpies a lot of storage.
+Results are saved inside `sim_data.exp_results/prediction/` folder as well. You can add `--vis` option to visualize results in wandb panel during optimization. But please be aware that this visualization occpies a lot of storage.
+
+## Evaluation
+Finally, you can run `evaluate_joint.py` to evaluate joint estimation as well as camera pose and video moving map. 
+```bash
+python evaluate_joint.py --view_dir sim_data/partnet_mobility/Microwave/7265/joint_0_bg/view_0/ \ 
+--results_dir sim_data/exp_results/prediction/Microwave/7265/joint_0_bg/view_0/refinement/monst3r/chamfer/0/
+```
 
 ## Citation
 If you find our work to be helpful, please consider cite our paper
