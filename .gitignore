@@ -1,1 +1,3 @@
 sim_data/
+__pycache__/
+*.pyc
