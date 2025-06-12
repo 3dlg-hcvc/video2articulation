@@ -166,8 +166,8 @@ class CoarsePrediction():
                     se3 = estimate_se3_transformation(init_kp1, init_kp2)
                 elif type == "prismatic":
                     only_translation = np.mean((init_kp1 - init_kp2), axis=0)
-                    source2target = np.eye(4)
-                    source2target[:3, 3] = only_translation
+                    se3 = np.eye(4)
+                    se3[:3, 3] = only_translation
                 se3_list.append(se3)
                 rotation = se3[:3, :3]
                 translation = se3[:3, 3]

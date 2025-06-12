@@ -399,17 +399,18 @@ class BundleAdjustment(torch.nn.Module):
         tbar = tqdm(range(self.steps))
         for i, _ in enumerate(tbar):
             self.current_step = i
-            for r in range(self.round):
-                start_time = time.time()
-                self.optimizer.zero_grad()
-                
-                chamfer_loss = self.chamfer_loss(r)
-                loss = torch.mean(chamfer_loss)
 
-                loss.backward()
-                self.optimizer.step()
-                self.lr_scheduler.step()
-                end_time = time.time()
+            start_time = time.time()
+            self.optimizer.zero_grad()
+            
+            chamfer_loss = self.chamfer_loss()
+            loss = torch.mean(chamfer_loss)
+
+            loss.backward()
+            self.optimizer.step()
+            self.lr_scheduler.step()
+            end_time = time.time()
+
             eval_loss = loss.detach()
             if eval_loss.detach().cpu().item() < prev_loss:
                 self.best_joint_axis = self.joint_axis.detach().cpu().numpy()
