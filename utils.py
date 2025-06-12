@@ -16,32 +16,6 @@ def set_seed(seed: int):
     random.seed(seed)
 
 
-# def inverse_transformation(T: np.ndarray | torch.Tensor) -> np.ndarray | torch.Tensor:
-#     """
-#     Compute the inverse of an SE(3) transformation matrix.
-
-#     Parameters:
-#         T (numpy.ndarray | torch.Tensor): Bx4x4 transformation matrix.
-
-#     Returns:
-#         numpy.ndarray: Inverse of the transformation matrix.
-#     """
-#     # Extract the rotation matrix (R) and translation vector (t)
-#     R = T[:3, :3]
-#     t = T[:3, 3]
-
-#     # Compute the inverse
-#     R_inv = R.T  # Transpose of the rotation matrix
-#     t_inv = -np.dot(R_inv, t)  # Negated product of R_inv and t
-
-#     # Construct the inverse transformation matrix
-#     T_inv = np.eye(4)
-#     T_inv[:3, :3] = R_inv
-#     T_inv[:3, 3] = t_inv
-
-#     return T_inv
-
-
 def inverse_transformation(T: np.ndarray | torch.Tensor) -> np.ndarray | torch.Tensor:
     """
     Invert a 4x4 SE(3) transformation matrix or a batch of such matrices.

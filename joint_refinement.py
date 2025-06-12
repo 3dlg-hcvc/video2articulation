@@ -238,7 +238,7 @@ class BundleAdjustment(torch.nn.Module):
         self.best_joint_state = self.joint_state.detach().cpu().numpy()
         self.best_camera_poses = self.camera_pose.detach().cpu().numpy()
         self.best_moving_vectors = self.moving_map_vec.detach().cpu().numpy()
-        self.best_loss = -100
+        self.best_loss = 100
         self.log_dir = f"{log_dir}/{loss_func}/{seed}/{self.joint_type}"
         if not os.path.exists(self.log_dir):
             os.makedirs(self.log_dir)
@@ -394,8 +394,6 @@ class BundleAdjustment(torch.nn.Module):
 
 
     def optimize_adam(self, gt_joint_type: str, gt_joint_axis: np.ndarray, gt_joint_pos: np.ndarray, gt_joint_value: np.ndarray):
-        prev_loss = 1000
-
         tbar = tqdm(range(self.steps))
         for i, _ in enumerate(tbar):
             self.current_step = i
@@ -412,14 +410,15 @@ class BundleAdjustment(torch.nn.Module):
             end_time = time.time()
 
             eval_loss = loss.detach()
-            if eval_loss.detach().cpu().item() < prev_loss:
+            if eval_loss.detach().cpu().item() < self.best_loss:
                 self.best_joint_axis = self.joint_axis.detach().cpu().numpy()
                 self.best_joint_pos = self.joint_pos.detach().cpu().numpy()
                 self.best_joint_state = self.joint_state.detach().cpu().numpy()
                 self.best_camera_poses = self.camera_pose.detach().cpu().numpy()
                 if self.mask_type == "monst3r":
                     self.best_moving_vectors = self.moving_map_vec.detach().cpu().numpy()
-                prev_loss = eval_loss.detach().cpu().item()
+                
+                self.best_loss = eval_loss.detach().cpu().item()
 
             joint_ori_error, joint_pos_error, joint_state_error, cam_rotation_error, cam_translation_error, soft_iou, valid = self.compute_estimation_error(gt_joint_type, gt_joint_axis, gt_joint_pos, gt_joint_value)
             wandb.log({f"Eval/{self.loss_func} error": eval_loss.detach().cpu().item(),
