@@ -474,7 +474,7 @@ class BundleAdjustment(torch.nn.Module):
             full_moving_map = self.part_segments_full * self.moving_map_vec.reshape(1, self.part_segments_full.shape[1], 1, 1) # N, old_parts, H, W
             moving_map = torch.sum(full_moving_map, dim=1) # N, W, H
             moving_map = (moving_map - torch.amin(moving_map, dim=(1, 2), keepdim=True)) / (torch.amax(moving_map, dim=(1, 2), keepdim=True) - torch.amin(moving_map, dim=(1, 2), keepdim=True) + 1e-12)
-            gt_old_moving_map = torch.logical_and(self.gt_moving_map_bool, self.old_part_segments_list).to(torch.float64)
+            gt_old_moving_map = self.gt_moving_map_bool.to(torch.float64)
             intersection = gt_old_moving_map * moving_map
             union = gt_old_moving_map + moving_map - intersection
             valid_union_index = torch.nonzero(torch.sum(union, dim=(1, 2)) > 1e-3, as_tuple=True)[0]
@@ -502,8 +502,8 @@ class BundleAdjustment(torch.nn.Module):
                 (torch.amax(moving_map, dim=(1, 2), keepdim=True) - torch.amin(moving_map, dim=(1, 2), keepdim=True) + 1e-12)
             np.savez_compressed(f"{self.log_dir}/moving_map.npz", a=moving_map.detach().cpu().numpy())
         else:
-            gt_old_moving_map = torch.logical_and(self.gt_moving_map_bool, self.old_part_segments_list).cpu().numpy()
-            np.savez_compressed(f"{self.log_dir}/moving_map.npz", gt_old_moving_map)
+            gt_moving_map = self.gt_moving_map_bool.cpu().numpy()
+            np.savez_compressed(f"{self.log_dir}/moving_map.npz", gt_moving_map)
         with open(f"{self.log_dir}/best_loss.txt", 'w') as f:
             f.write(str(self.best_loss))
 
