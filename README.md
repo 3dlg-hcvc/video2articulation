@@ -61,8 +61,7 @@ After running the coarse prediction module, the results are saved inside `sim_da
 ## Refinement
 The second stage is refinement. Our refinement module attempts to optimize joint parameters of a single type of joint. Therefore, you need to run this module twice to get final prediction results.
 ```bash
-python joint_refinement.py --exp_name refinement --view_dir sim_data/partnet_mobility/Microwave/7265/joint_0_bg/view_0/ --mask_type monst3r --joint revolute --loss chamfer
-python joint_refinement.py --exp_name refinement --view_dir sim_data/partnet_mobility/Microwave/7265/joint_0_bg/view_0/ --mask_type monst3r --joint prismatic --loss chamfer
+python launch_joint_refinement.py --exp_name refinement --view_dir sim_data/partnet_mobility/Microwave/7265/joint_0_bg/view_0/ --mask_type monst3r --loss chamfer
 ```
 Results are saved inside `sim_data.exp_results/prediction/` folder as well. You can add `--vis` option to visualize results in wandb panel during optimization. But please this visualization occpies a lot of storage.
 
