@@ -104,12 +104,7 @@ def compute_estimation_error(gt_joint_parameter: Tuple[str, np.ndarray, np.ndarr
     return evaluation_results
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--view_dir", type=str, required=True)
-    parser.add_argument("--results_dir", type=str, required=True)
-    args = parser.parse_args()
-
+def main(args):
     meta_file = "new_partnet_mobility_dataset_correct_intr_meta.json"
     with open(meta_file, "r") as f:
         data_meta = json.load(f)
@@ -252,3 +247,12 @@ if __name__ == "__main__":
         
     print(f"Evaluation results: {evaluation_results}")
         
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--view_dir", type=str, required=True)
+    parser.add_argument("--results_dir", type=str, required=True)
+    args = parser.parse_args()
+
+    main(args)
+    
