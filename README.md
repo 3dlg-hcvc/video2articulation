@@ -58,16 +58,25 @@ project_root_directory
 ## Coarse Prediction
 Our pipeline starts with coarse prediction.
 ```bash
-python joint_coarse_prediction.py --view_dir sim_data/partnet_mobility/Microwave/7265/joint_0_bg/view_0/ --mask_type monst3r --seed 0
+python joint_coarse_prediction.py \
+--view_dir sim_data/partnet_mobility/Microwave/7265/joint_0_bg/view_0/ \
+--preprocess_dir sim_data/exp_results/preprocessing/Microwave/7265/joint_0_bg/view_0/ \
+--prediction_dir sim_data/exp_results/prediction/Microwave/7265/joint_0_bg/view_0/ \
+--mask_type monst3r
 ```
-Here the `view_dir` refers to the directory contains data of a specific test video. `mask_type` refers to the video moving map. You can run `python joint_coarse_prediction.py -h` to see different options.
+Here the `view_dir` refers to the directory containing data of a specific test video. `preprocess_dir` refers to the directory containing preprocessed data by [MonST3R](https://github.com/Junyi42/monst3r) and [automatic part segmentation](https://github.com/zrporz/AutoSeg-SAM2). `prediction_dir` is the path you want to save the results. `mask_type` refers to the video moving map. You can run `python joint_coarse_prediction.py -h` to see different options.
 
 After running the coarse prediction module, the results are saved inside `sim_data/exp_results/prediction/` folder.
 
 ## Refinement
 The second stage is refinement. Our refinement module attempts to optimize joint parameters of a single type of joint. Therefore, you need to run this module twice to get final prediction results.
 ```bash
-python launch_joint_refinement.py --exp_name refinement --view_dir sim_data/partnet_mobility/Microwave/7265/joint_0_bg/view_0/ --mask_type monst3r --loss chamfer
+python launch_joint_refinement.py --exp_name refinement \
+--view_dir sim_data/partnet_mobility/Microwave/7265/joint_0_bg/view_0/ \
+--preprocess_dir sim_data/exp_results/preprocessing/Microwave/7265/joint_0_bg/view_0/ \
+--prediction_dir sim_data/exp_results/prediction/Microwave/7265/joint_0_bg/view_0/ \
+--mask_type monst3r \
+--loss chamfer
 ```
 Results are saved inside `sim_data/exp_results/prediction/` folder as well. You can add `--vis` option to visualize results in wandb panel during optimization. But please be aware that this visualization occpies a lot of storage.
 
@@ -76,16 +85,18 @@ We use [NKSR](https://github.com/nv-tlabs/NKSR) for mesh reconstruction. Please 
 
 In the NKSR environment, run
 ```bash
-python extract_mesh.py --view_dir sim_data/partnet_mobility/Microwave/7265/joint_0_bg/view_0/ \ 
---results_dir sim_data/exp_results/prediction/Microwave/7265/joint_0_bg/view_0/refinement/monst3r/chamfer/0/
+python extract_mesh.py \
+--view_dir sim_data/partnet_mobility/Microwave/7265/joint_0_bg/view_0/ \ 
+--refinement_results_dir sim_data/exp_results/prediction/Microwave/7265/joint_0_bg/view_0/refinement/monst3r/chamfer/0/
 ```
 It will reconstruct the whole mesh, the mesh of the moving part and static part of the object. It also samples 10000 points from the surface of the mesh for evaluating geometric reconstruction accuracy against the ground truth mesh. Results are saved inside `sim_data/exp_results/prediction/`. Note that sometimes this step needs large CUDA memory. We recommend using GPU with CUDA memory equal or larger than 48GB, such as RTX A6000.
 
 ## Evaluation
 Finally, you can run `evaluate.py` to evaluate all the prediction results. 
 ```bash
-python evaluate.py --view_dir sim_data/partnet_mobility/Microwave/7265/joint_0_bg/view_0/ \ 
---results_dir sim_data/exp_results/prediction/Microwave/7265/joint_0_bg/view_0/refinement/monst3r/chamfer/0/
+python evaluate.py \
+--view_dir sim_data/partnet_mobility/Microwave/7265/joint_0_bg/view_0/ \ 
+--refinement_results_dir sim_data/exp_results/prediction/Microwave/7265/joint_0_bg/view_0/refinement/monst3r/chamfer/0/
 ```
 
 ## Citation

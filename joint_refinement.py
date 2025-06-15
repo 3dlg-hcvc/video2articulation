@@ -2,17 +2,12 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import cv2
-from PIL import Image
 from pytorch3d.loss import chamfer_distance
 from pytorch3d.transforms import axis_angle_to_matrix, quaternion_to_matrix
 from scipy.spatial.transform import Rotation as R
 import wandb
 
-import random
-import pickle
-import json
 import os
-import shutil
 import time
 import glob
 from tqdm import tqdm
@@ -20,71 +15,36 @@ import argparse
 import yaml
 from typing import Tuple, List
 
-from utils import set_seed, find_movable_part, precompute_object2label, precompute_camera2label, depth2xyz
+from utils import set_seed
+from data import SimDataLoader
 
 
 class BundleAdjustment(torch.nn.Module):
-    def __init__(self, joint_data_dir: str, preprocess_dir: str, prediction_dir: str, opt_view: int, mask_type: str, 
+    def __init__(self, data_loader: SimDataLoader, prediction_dir: str, mask_type: str, 
                  joint_type: str, lr: float, loss_func: str, opt_steps: int, log_dir: str, 
                  device: torch.device, seed: int, vis_pcd: bool = False):
         super(BundleAdjustment, self).__init__()
         set_seed(seed)
         self.device = device
-        # init pc
-        self.actor_pose_path = f"{joint_data_dir}/actor_pose.pkl"
-        with open(f"{joint_data_dir}/actor_pose.pkl", 'rb') as f:
-            obj_pose_dict = pickle.load(f)
-        actor_list = []
-        for actor_name in obj_pose_dict.keys():
-            actor_list.append(int(actor_name[6:]))
-        moving_part_id = find_movable_part(obj_pose_dict)
-        
-        surface_dir = f"{joint_data_dir}/view_init"
-        surface_img = []
-        surface_xyz = []
-        surface_mask = []
-        surface_dynamic_mask_list = []
-        for i in range(24):
-            img = cv2.imread("{}/rgb/{}".format(surface_dir, "%06d.png" % i))
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            surface_img.append(img)
-            xyz = np.load("{}/xyz/{}".format(surface_dir, "%06d.npz" % i))['a']
-            surface_xyz.append(xyz)
-            segment = np.load("{}/segment/{}".format(surface_dir, "%06d.npz" % i))['a']
-            mask = segment == -1
-            surface_dynamic_mask = segment == moving_part_id
-            for actor_id in actor_list:
-                mask_id = segment == actor_id
-                mask = np.logical_or(mask, mask_id)
-            surface_mask.append(mask)
-            surface_dynamic_mask_list.append(surface_dynamic_mask)
-        self.surface_rgb = np.stack(surface_img).reshape(-1, 3)
-        self.surface_xyz = np.stack(surface_xyz).reshape(-1, 3)
-        self.surface_segment = np.stack(surface_mask).flatten()
-        self.surface_dynamic_segment = np.stack(surface_dynamic_mask_list).flatten()
-
-        sample_num = min(480 * 64, self.surface_rgb.shape[0])
-        sample_index = np.random.choice(np.arange(self.surface_rgb.shape[0]), sample_num, replace=False)
-        self.surface_rgb = torch.from_numpy(self.surface_rgb[sample_index]).to(device) # sample_num * 3
-        self.surface_xyz = torch.from_numpy(self.surface_xyz[sample_index]).to(device) # sample_num * 3
-        self.surface_segment = torch.from_numpy(self.surface_segment[sample_index]).to(device) # sample_num * 1
-        self.surface_dynamic_segment = torch.from_numpy(self.surface_dynamic_segment[sample_index]).to(device) # sample_num * 1
-        self.surface_static_segment = torch.logical_and(self.surface_segment, ~self.surface_dynamic_segment) # sample_num * 1
-        
-        self.surface_static_xyz = self.surface_xyz[self.surface_static_segment].to(torch.float64)
-        self.surface_dynamic_xyz = self.surface_xyz[self.surface_dynamic_segment].to(torch.float64)
-        self.surface_xyz = self.surface_xyz[self.surface_segment]
-        self.surface_rgb = self.surface_rgb[self.surface_segment]
-
-        init_base_pose = obj_pose_dict["actor_6"][0]
-        object2label_np = precompute_object2label(init_base_pose)
-        object2label = torch.from_numpy(object2label_np).to(torch.float64).to(device) # 4, 4
-        self.surface_xyz = self.surface_xyz.to(torch.float64)
-        self.surface_xyz = torch.matmul(self.surface_xyz, object2label[:3, :3].T) + object2label[:3, 3]
-        self.surface_static_xyz = torch.matmul(self.surface_static_xyz, object2label[:3, :3].T) + object2label[:3, 3]
-        self.surface_dynamic_xyz = torch.matmul(self.surface_dynamic_xyz, object2label[:3, :3].T) + object2label[:3, 3]
-        
-        view_dir = f"{joint_data_dir}/view_{opt_view}"
+        self.data_loader = data_loader
+        # init pcd
+        surface_rgb_np, surface_xyz_np, surface_dynamic_np, surface_static_np = self.data_loader.load_obj_surface(sample_num=480 * 64, return_segments=True)
+        self.surface_rgb = torch.from_numpy(surface_rgb_np).to(device).to(torch.float64) # sample_num * 3
+        self.surface_xyz = torch.from_numpy(surface_xyz_np).to(device).to(torch.float64) # sample_num * 3
+        self.surface_dynamic_segment = torch.from_numpy(surface_dynamic_np).to(device).to(torch.float64) # sample_num * 3
+        self.surface_static_segment = torch.from_numpy(surface_static_np).to(device).to(torch.float64) # sample_num * 3
+        # video img & pcd
+        rgb_list, xyz_list = self.data_loader.load_rgbd_video()
+        self.xyz = torch.from_numpy(np.stack(xyz_list)).to(device) # N, H, W, 3
+        self.rgb = torch.from_numpy(np.stack(rgb_list)).to(device) # N, H, W, 3
+        N, H, W, C = self.rgb.shape
+        # gt moving map & obj mask
+        gt_moving_map_list = self.data_loader.load_gt_moving_map()
+        self.gt_moving_map_bool = torch.from_numpy(np.stack(gt_moving_map_list)).to(device)
+        obj_mask_list = self.data_loader.load_obj_mask()
+        self.obj_mask_bool = torch.from_numpy(np.stack(obj_mask_list)).to(device) # N, H, W
+        # gt camera pose
+        self.gt_camera_se3 = self.data_loader.load_gt_camera_pose_se3()
 
         # optimize parameter
         ## camera pose
@@ -115,97 +75,20 @@ class BundleAdjustment(torch.nn.Module):
         self.joint_type = joint_type
         
         ## moving map
-        # gt moving map
-        sample_rgb_dir = f"{view_dir}/sample_rgb"
-        segment_dir = f"{view_dir}/segment"
-        img_list = os.listdir(sample_rgb_dir)
-        img_list.sort()
-        sample_rgb_index = [int(file_name[:-4]) for file_name in os.listdir(f"{view_dir}/sample_rgb/")]
-        sample_rgb_index.sort()
-        
-        gt_moving_map = []
-        obj_mask_list = []
-        for i in range(len(img_list)):
-            segment = np.load(f"{segment_dir}/{img_list[i][:-4]}.npz")['a']
-            dynamic_mask = segment == moving_part_id
-            gt_moving_map.append(torch.from_numpy(dynamic_mask))
-            obj_mask = segment == -1
-            for actor_id in actor_list:
-                obj_mask_id = segment == actor_id
-                obj_mask = np.logical_or(obj_mask, obj_mask_id)
-            obj_mask_list.append(obj_mask)
-        self.gt_moving_map_bool = torch.stack(gt_moving_map).to(device) # N, H, W
-        # obj mask
-        self.obj_mask_bool = torch.from_numpy(np.stack(obj_mask_list)).to(device) # N, H, W
-        self.obj_mask = torch.from_numpy(np.stack(obj_mask_list)).to(torch.float64).to(device) # N, H, W
-
-        # video pc
-        self.intrinsics = np.load(f"{view_dir}/intrinsics.npy")
-        self.intrinsics_torch = torch.from_numpy(self.intrinsics).to(device)
-        self.intrinsics_torch = self.intrinsics_torch.to(torch.float64)
-        depth_list = glob.glob(f"{view_dir}/depth/*.npz")
-        depth_list.sort()
-        xyz = []
-        rgb_list = glob.glob(f"{view_dir}/rgb/*.jpg")
-        rgb_list.sort()
-        rgb = []
-        for i in sample_rgb_index:
-            depth = np.load(depth_list[i])['a']
-            xyz.append(depth2xyz(depth, self.intrinsics)) # in opengl coordinate
-            bgr = cv2.imread(rgb_list[i])
-            rgb.append(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
-            
-        self.xyz = torch.from_numpy(np.stack(xyz)).to(device) # N, H, W, 3
-        self.rgb = torch.from_numpy(np.stack(rgb)).to(device) # N, H, W, 3
-        N, H, W, C = self.rgb.shape
-        # part segments map
-        segments_map_list = glob.glob(f"{preprocess_dir}/video_segment_reverse/small/final-output/*.npz")
-        segments_map_list.sort(key=lambda x: int(x[x.rfind('_') + 1:-4]), reverse=True)
-        segments_map_list = [segments_map_list[i] for i in sample_rgb_index]
-        origin_segments_list = []
-        for segments_map in segments_map_list:
-            origin_segments_list.append(np.load(segments_map)['a'][:, 0, :, :])
-        non_overlap_segments_list = self.remove_overlay(origin_segments_list)
-        initial_segments = non_overlap_segments_list[0]
-        self.old_segment_id_list = []
-        initial_obj_mask = self.obj_mask_bool[0].cpu().numpy()
-        self.part_segments_list = []
-        old_part_segments_list = []
-        for segment_id in range(initial_segments.shape[0]):
-            part_segment0 = initial_segments[segment_id]
-            part_occupation = np.logical_and(part_segment0, initial_obj_mask)
-            if np.sum(part_occupation) > 100:
-                self.old_segment_id_list.append(segment_id)
-        for frame_id, segments_map in enumerate(segments_map_list):
-            part_segments = non_overlap_segments_list[frame_id]
-            obj_segments = self.obj_mask_bool[frame_id].cpu().numpy() # H, W
-            part_segments = np.logical_and(part_segments[self.old_segment_id_list], obj_segments[np.newaxis, ...])
-            self.part_segments_list.append(part_segments) # old_parts, H, W
-            old_part_segments = np.zeros_like(obj_segments, dtype=np.bool_)
-            for part_id in range(part_segments.shape[0]):
-                old_part_segments = np.logical_or(old_part_segments, part_segments[part_id])
-            old_part_segments_list.append(torch.from_numpy(old_part_segments).to(self.device)) # H, W
-        self.old_part_segments_list = torch.stack(old_part_segments_list).to(self.device) # N, H, W
-
-        part_segments_full = np.stack(self.part_segments_list) # numpy N, old_parts, H, W
-        self.part_segments_full = torch.from_numpy(part_segments_full).to(torch.float64).to(self.device) # N, old_parts, H, W
-
+        part_segments_np, old_part_segments_np = self.data_loader.load_part_segmentation(obj_mask_list)
+        self.old_part_segments_list = torch.from_numpy(old_part_segments_np).to(self.device) # N, H, W
+        self.part_segments_full = torch.from_numpy(part_segments_np).to(torch.float64).to(self.device) # N, old_parts, H, W
         if mask_type == "monst3r":
-            moving_map_list = glob.glob(f"{preprocess_dir}/monst3r/dynamic_mask_*.png")
-            moving_map_list.sort(key=lambda x: int(x[x.rfind('_') + 1:-4]))
-            # moving_map_list = [moving_map_list[i] for i in opt_index]
-            part_moving_occupation = np.zeros((len(self.old_segment_id_list),))
+            monst3r_moving_map_list = self.data_loader.load_monst3r_moving_map()
+            part_moving_occupation = np.zeros((self.part_segments_full.shape[1],))
             moving_map = []
-            for frame_id, moving_map_file in enumerate(moving_map_list):
-                pred_mask_img = Image.open(moving_map_file).convert('L')
-                pred_mask_img = pred_mask_img.resize((640, 480), Image.BICUBIC)
-                pred_mask = np.array(pred_mask_img, dtype=np.float64)
-                pred_mask = (pred_mask / 255.)
+            for frame_id in range(len(monst3r_moving_map_list)):
+                pred_mask = monst3r_moving_map_list[frame_id].astype(np.float64)
                 moving_map.append(torch.from_numpy(pred_mask))
                 pred_mask_bool = np.round(pred_mask).astype(np.bool_)
-                part_segments = self.part_segments_list[frame_id]
+                part_segments = part_segments_np[frame_id]
                 part_moving_occupation += np.sum(np.logical_and(part_segments, pred_mask_bool[np.newaxis, ...]), axis=(1, 2))
-            part_moving_occupation = part_moving_occupation / np.sum(part_segments_full, axis=(0, 2, 3))
+            part_moving_occupation = part_moving_occupation / np.sum(part_segments_np, axis=(0, 2, 3))
             self.moving_map_vec = torch.nn.Parameter(torch.from_numpy(part_moving_occupation).to(device), requires_grad=True) # old_parts,
         elif mask_type == "gt":
             self.moving_map = self.gt_moving_map_bool.clone().to(torch.float64)
@@ -222,13 +105,6 @@ class BundleAdjustment(torch.nn.Module):
         self.lr = lr
         self.mask_type = mask_type
         self.vis_pcd = vis_pcd
-        
-        gt_camera_pose = np.load(f"{view_dir}/camera_pose.npy")
-        self.gt_camera_se3 = []
-        for i in sample_rgb_index:
-            gt_camera_se3_i= precompute_camera2label(gt_camera_pose[i], object2label_np)
-            self.gt_camera_se3.append(gt_camera_se3_i)
-        self.gt_camera_se3 = np.stack(self.gt_camera_se3) # numpy N, 4, 4
 
         self.lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, opt_steps)
 
@@ -448,15 +324,12 @@ class BundleAdjustment(torch.nn.Module):
         if np.any(np.isnan(joint_ori_error)):
             print("pred_joint_ori:", pred_joint_axis)
             print("joint type:", gt_joint_type)
-            return 0, 0, 0, 0, 0, 0, False
+            joint_ori_error = np.pi / 2
 
         n = np.cross(pred_joint_axis, gt_joint_axis)
         joint_pos_error = np.abs(np.dot(n, (pred_joint_pos - gt_joint_pos))) / np.linalg.norm(n)
         if np.any(np.isnan(joint_pos_error)):
-            print("pred_joint_ori:", pred_joint_axis)
-            print("joint type:", gt_joint_type)
-            return 0, 0, 0, 0, 0, 0, False
-
+            joint_pos_error = 1
         if gt_joint_type == "prismatic":
             joint_pos_error = 0
         
@@ -588,6 +461,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--exp_name", type=str, required=True)
     parser.add_argument("--view_dir", type=str, required=True)
+    parser.add_argument("--preprocess_dir", type=str, required=True)
+    parser.add_argument("--prediction_dir", type=str, required=True)
+    parser.add_argument("--meta_file_path", type=str, default="new_partnet_mobility_dataset_correct_intr_meta.json")
     parser.add_argument("--mask_type", type=str, choices=["gt", "monst3r"], required=True)
     parser.add_argument("--joint", type=str, choices=["revolute", "prismatic"], required=True)
     parser.add_argument("--loss", type=str, choices=["chamfer", "hausdorff"], required=True)
@@ -597,61 +473,34 @@ if __name__ == "__main__":
     parser.add_argument("--vis", action="store_true", default=False)
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
+    
+    data_loader = SimDataLoader(args.meta_file_path, args.view_dir, args.preprocess_dir, None)
 
-    joint_type_map = {"hinge": "revolute", "slider": "prismatic"}
-    meta_file = "new_partnet_mobility_dataset_correct_intr_meta.json"
-    with open(meta_file, "r") as f:
-        data_meta = json.load(f)
-
-    results_root_dir = "sim_data/exp_results/prediction/"
-    preprocess_root_dir = "sim_data/exp_results/preprocessing/"
-
-    view_dir = args.view_dir
-    joint_data_dir = view_dir[:-7]
-    opt_view = int(view_dir[-2])
-    cat = joint_data_dir.split('/')[2]
-    obj_id = view_dir.split('/')[3]
-    mask_type = args.mask_type
-    interaction_list = data_meta[cat][obj_id]["interaction_list"]
-    joint_id = int(view_dir.split('/')[4][6:-3])
-    interaction_dict = None
-    for interaction in interaction_list:
-        if joint_id == interaction["id"]:
-            interaction_dict = interaction
-    assert interaction_dict is not None, "does not find interaction"
-    gt_joint_axis = interaction_dict["joint"]["axis"]["direction"]
-    gt_joint_pos = interaction_dict["joint"]["axis"]["origin"]
-    gt_joint_type = joint_type_map[interaction_dict["type"]]
-    sample_rgb_index = [int(file_name[:-4]) for file_name in os.listdir(f"{joint_data_dir}/view_{opt_view}/sample_rgb/")]
-    sample_rgb_index.sort()
-    gt_joint_value = np.load(f"{joint_data_dir}/gt_joint_value.npy")
-    sample_gt_joint_value = gt_joint_value[sample_rgb_index]
+    gt_joint_type, gt_joint_axis, gt_joint_pos, gt_joint_value = data_loader.load_gt_joint_params()
 
     opt_steps = args.steps
     device = torch.device(args.device)
     loss_func = args.loss
-    prediction_dir = f"{results_root_dir}/{cat}/{obj_id}/joint_{joint_id}_bg/view_{opt_view}/"
-    preprocess_dir = f"{preprocess_root_dir}/{cat}/{obj_id}/joint_{joint_id}_bg/view_{opt_view}/"
-    log_dir = f"{results_root_dir}/{cat}/{obj_id}/joint_{joint_id}_bg/view_{opt_view}/{args.exp_name}/{mask_type}/"
+    log_dir = f"{args.prediction_dir}/{args.exp_name}/{args.mask_type}/"
     os.makedirs(f"{log_dir}/{loss_func}/{args.seed}/{args.joint}/", exist_ok=True)
 
     wandb.login(key=os.environ["WANDB_API_KEY"])
     run_config = {
-            "mask_type": mask_type,
+            "mask_type": args.mask_type,
             "loss_function": loss_func,
             "epochs": opt_steps,
             "learning_rate": args.lr,
             "seed": args.seed,
         }
 
-    with wandb.init(project=f"video_articulation_{args.exp_name}_{mask_type}", \
+    with wandb.init(project=f"video_articulation_{args.exp_name}_{args.mask_type}", \
                     config=run_config, dir=f"{log_dir}/{loss_func}/{args.seed}/{args.joint}", \
-                    name=f"{view_dir}/{args.joint}/seed{args.seed}/"):
-        ba = BundleAdjustment(joint_data_dir, preprocess_dir, prediction_dir, opt_view, mask_type, args.joint, 
+                    name=f"{args.view_dir}/{args.joint}/seed{args.seed}/"):
+        ba = BundleAdjustment(data_loader, args.prediction_dir, args.mask_type, args.joint, 
                               args.lr, loss_func, opt_steps, log_dir, device, args.seed, args.vis)
         wandb.watch(ba, log="all", log_freq=1)
         if not ba.valid:
             print("predict error")
         ba.dump_configuration()
-        ba.optimize_adam(gt_joint_type, gt_joint_axis, gt_joint_pos, sample_gt_joint_value)
+        ba.optimize_adam(gt_joint_type, gt_joint_axis, gt_joint_pos, gt_joint_value)
         ba.save_estimation_results()

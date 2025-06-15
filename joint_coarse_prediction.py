@@ -1,62 +1,35 @@
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 from kornia.feature import LoFTR
-from PIL import Image
 import cv2
 import torch
 import argparse
 import os
-import glob
-import pickle
 from tqdm import tqdm
 from typing import Tuple, List, Dict
 
-from utils import set_seed, depth2xyz, find_movable_part, precompute_camera2label, precompute_object2label, estimate_se3_transformation
+from utils import set_seed, estimate_se3_transformation
+from data import SimDataLoader
 
 
 class CoarsePrediction():
-    def __init__(self, view_dir: str, preprocess_dir: str, prediction_dir: str, mask_type: str, device: torch.device, seed: int = 0):
-        self.cat = view_dir.split('/')[2]
-        self.obj_id = view_dir.split('/')[3]
-        self.view_dir = view_dir
-        self.sample_rgb_dir = f"{view_dir}/sample_rgb"
-        self.segment_dir = f"{view_dir}/segment"
-        self.monst3r_dir = f"{preprocess_dir}/monst3r"
-        self.prediction_dir = prediction_dir
-        self.actor_pose_path = f"{view_dir[:-7]}/actor_pose.pkl"
-        self.gt_camera_pose_path = f"{view_dir}/camera_pose.npy"
-        self.intrinsics = np.load(f"{view_dir}/intrinsics.npy")
+    def __init__(self, data_loader: SimDataLoader, prediction_dir: str, mask_type: str, device: torch.device, seed: int = 0):
+        self.data_loader = data_loader
         self.mask_type = mask_type
         self.device = device
 
         self.matcher = LoFTR(pretrained="indoor").to(device)
 
-        self.H = 480
-        self.W = 640
-        with open(self.actor_pose_path, 'rb') as f:
-            obj_pose_dict = pickle.load(f)
-        init_base_pose = obj_pose_dict["actor_6"][0]
-        object2label = precompute_object2label(init_base_pose)
-        gt_camera_pose = np.load(self.gt_camera_pose_path)
-        self.camera2label = [precompute_camera2label(gt_camera_pose[0], object2label)]
+        self.H, self.W = data_loader.H, data_loader.W
+        self.rgb_list, self.xyz_list =  self.data_loader.load_rgbd_video()
+        self.gt_camera_se3 = self.data_loader.load_gt_camera_pose_se3()
+        self.camera2label = [self.gt_camera_se3[0]]
 
-        self.gt_camera2label = []
-        self.dynamic_mask_list = []
-        self.img_list = os.listdir(self.sample_rgb_dir)
-        self.img_list.sort()
         if mask_type == "gt":
-            self.moving_part_id = find_movable_part(obj_pose_dict)
-            for i in range(len(self.img_list)):
-                segment = np.load(f"{self.segment_dir}/{self.img_list[i][:-4]}.npz")['a']
-                dynamic_mask = segment == self.moving_part_id
-                self.dynamic_mask_list.append(dynamic_mask)
-                self.gt_camera2label.append(precompute_camera2label(gt_camera_pose[int(self.img_list[i][:-4])], object2label))
+            self.dynamic_mask_list = self.data_loader.load_gt_moving_map()
         else:
-            for i in range(len(self.img_list)):
-                dynamic_mask = self.load_monst3r_mask(f"{self.monst3r_dir}/dynamic_mask_{i}.png")
-                self.dynamic_mask_list.append(dynamic_mask)
-                self.gt_camera2label.append(precompute_camera2label(gt_camera_pose[int(self.img_list[i][:-4])], object2label))
-        self.gt_camera_se3 = np.stack(self.gt_camera2label)
+            self.dynamic_mask_list = self.data_loader.load_monst3r_moving_map()
+        self.prediction_dir = prediction_dir
         self.prediction_joint_metrics = None
         self.prediction_joint_type = None
         self.seed = seed
@@ -70,11 +43,13 @@ class CoarsePrediction():
         return kp1, kp2
 
 
-    def compute_match(self, img1_path: str, img2_path: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        img1_raw = cv2.imread(img1_path, cv2.IMREAD_GRAYSCALE)
+    def compute_match(self, img1: np.ndarray, img2: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        # img1_raw = cv2.imread(img1_path, cv2.IMREAD_GRAYSCALE)
+        img1_raw = cv2.cvtColor(img1, cv2.COLOR_RGB2GRAY)
         img1_torch = torch.Tensor(img1_raw).cuda() / 255.
         img1_torch = torch.reshape(img1_torch, (1, 1, img1_torch.shape[0], img1_torch.shape[1]))
-        img2_raw = cv2.imread(img2_path, cv2.IMREAD_GRAYSCALE)
+        # img2_raw = cv2.imread(img2_path, cv2.IMREAD_GRAYSCALE)
+        img2_raw = cv2.cvtColor(img2, cv2.COLOR_RGB2GRAY)
         img2_torch = torch.Tensor(img2_raw).cuda() / 255.
         img2_torch = torch.reshape(img2_torch, (1, 1, img2_torch.shape[0], img2_torch.shape[1]))
 
@@ -85,14 +60,6 @@ class CoarsePrediction():
         mkpts1 = correspondences_dict['keypoints1'].cpu().numpy()
         mconf = correspondences_dict['confidence'].cpu().numpy()
         return mkpts0, mkpts1, mconf
-    
-
-    def load_monst3r_mask(self, mask_path: str) -> np.ndarray:
-        pred_mask_img = Image.open(mask_path).convert('L')
-        pred_mask_img = pred_mask_img.resize((self.W, self.H), Image.BICUBIC)
-        pred_mask = np.array(pred_mask_img)
-        pred_mask = (pred_mask / 255.).astype(np.bool_)
-        return pred_mask
 
 
     def align_pc(self, curr_pc: np.ndarray, base_kp: np.ndarray, curr_kp: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
@@ -105,17 +72,14 @@ class CoarsePrediction():
         return align_curr_pc.reshape(H, W, 3), curr2base
 
 
-    def align_view(self, img_list: List[str]) -> List[np.ndarray]:
+    def align_view(self,) -> List[np.ndarray]:
         pc_list = []
         camera2label = self.camera2label[0].copy()
-        for i in range(len(img_list) - 1):
-            base_depth = np.load(f"{self.view_dir}/depth/{img_list[i][:-4]}.npz")['a']
-            self.H, self.W = base_depth.shape
-            base_pc = depth2xyz(base_depth, self.intrinsics)
-            next_depth = np.load(f"{self.view_dir}/depth/{img_list[i + 1][:-4]}.npz")['a']
-            next_pc = depth2xyz(next_depth, self.intrinsics)
+        for i in range(len(self.rgb_list) - 1):
+            base_pc = self.xyz_list[i]
+            next_pc = self.xyz_list[i + 1]
 
-            mkpts0, mkpts1, conf = self.compute_match(f"{self.sample_rgb_dir}/{img_list[i]}", f"{self.sample_rgb_dir}/{img_list[i + 1]}")
+            mkpts0, mkpts1, conf = self.compute_match(self.rgb_list[i], self.rgb_list[i + 1])
             match_mask = conf > 0.95
             mkpts0 = mkpts0[match_mask].astype(np.uint32)
             mkpts1 = mkpts1[match_mask].astype(np.uint32)
@@ -341,14 +305,14 @@ class CoarsePrediction():
 
 
     def estimate_joint(self,) -> Tuple[Dict[str, Dict[str, np.ndarray]], str]:
-        img_list = os.listdir(self.sample_rgb_dir)
-        img_list.sort()
-        pc_list = self.align_view(img_list)
+        # img_list = os.listdir(self.sample_rgb_dir)
+        # img_list.sort()
+        pc_list = self.align_view()
         result_list = []
         pair_list = []
         for interval in [1, 2, 3]:
-            for i in range(0, len(img_list) - interval, 1):
-                mkpts0, mkpts1, conf = self.compute_match(f"{self.sample_rgb_dir}/{img_list[i]}", f"{self.sample_rgb_dir}/{img_list[i + interval]}")
+            for i in range(0, len(self.rgb_list) - interval, 1):
+                mkpts0, mkpts1, conf = self.compute_match(self.rgb_list[i], self.rgb_list[i + interval])
                 match_mask = conf > 0.9
                 mkpts0 = mkpts0[match_mask].astype(np.uint32)
                 mkpts1 = mkpts1[match_mask].astype(np.uint32)
@@ -400,20 +364,21 @@ class CoarsePrediction():
             os.makedirs(f"{prediction_result_dir}/prismatic/", exist_ok=True)
             np.save(f"{prediction_result_dir}/revolute/joint_axis.npy", self.prediction_joint_metrics["revolute"]["axis"])
             np.save(f"{prediction_result_dir}/revolute/joint_pos.npy", self.prediction_joint_metrics["revolute"]["pos"])
-            revolute_joint_value_list = np.arange(len(self.img_list)) * self.prediction_joint_metrics["revolute"]["average_value"]
+            revolute_joint_value_list = np.arange(len(self.rgb_list)) * self.prediction_joint_metrics["revolute"]["average_value"]
             np.save(f"{prediction_result_dir}/revolute/joint_value.npy", revolute_joint_value_list)
             np.save(f"{prediction_result_dir}/prismatic/joint_axis.npy", self.prediction_joint_metrics["prismatic"]["axis"])
             np.save(f"{prediction_result_dir}/prismatic/joint_pos.npy", self.prediction_joint_metrics["prismatic"]["pos"])
-            prismatic_joint_value_list = np.arange(len(self.img_list)) * self.prediction_joint_metrics["prismatic"]["average_value"]
+            prismatic_joint_value_list = np.arange(len(self.rgb_list)) * self.prediction_joint_metrics["prismatic"]["average_value"]
             np.save(f"{prediction_result_dir}/prismatic/joint_value.npy", prismatic_joint_value_list)
             os.makedirs(f"{prediction_result_dir}/cam_pose/", exist_ok=True)
             for frame, cam2label in enumerate(self.camera2label):
                 np.save(f"{prediction_result_dir}/cam_pose/cam2label_{frame}.npy", cam2label)
 
 
-    def compute_estimation_error(self, gt_joint_type: str, gt_joint_axis: np.ndarray, gt_joint_pos: np.ndarray, gt_joint_value: np.ndarray) -> Tuple[float, float, float, int, float, float, int]:
+    def compute_estimation_error(self, gt_joint_type: str, gt_joint_axis: np.ndarray, gt_joint_pos: np.ndarray, gt_joint_value: np.ndarray) -> Tuple[float, float, float, bool, float, float]:
         if self.prediction_joint_metrics is None or self.prediction_joint_metrics[self.prediction_joint_type] is None:
-            return 1, 1, 1, 1, 1, 1, 1
+            return np.pi / 2, 1, np.pi / 2 if gt_joint_type == "revolute" else 1, True, 1, np.pi / 2
+        
         joint_type_error = (self.prediction_joint_type != gt_joint_type)
         pred_joint_axis = self.prediction_joint_metrics[self.prediction_joint_type]["axis"]
         pred_joint_pos = self.prediction_joint_metrics[self.prediction_joint_type]["pos"]
@@ -422,7 +387,7 @@ class CoarsePrediction():
         if np.any(np.isnan(joint_ori_error)):
             print("pred_joint_ori:", pred_joint_axis)
             print("joint type:", gt_joint_type)
-            joint_ori_error = 1
+            joint_ori_error = np.pi / 2
 
         n = np.cross(pred_joint_axis, gt_joint_axis)
         joint_pos_error = np.abs(np.dot(n, (pred_joint_pos - gt_joint_pos))) / np.linalg.norm(n)
@@ -451,19 +416,21 @@ class CoarsePrediction():
         if np.any(np.isnan(cam_translation_error)):
             cam_translation_error = 1
 
-        return float(joint_ori_error), float(joint_pos_error), float(joint_state_error), int(joint_type_error), cam_translation_error, cam_rotation_error, 0
+        return float(joint_ori_error), float(joint_pos_error), float(joint_state_error), joint_type_error, cam_translation_error, cam_rotation_error
         
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--view_dir", type=str, required=True)
+    parser.add_argument("--preprocess_dir", type=str, required=True)
+    parser.add_argument("--prediction_dir", type=str, required=True)
+    parser.add_argument("--meta_file_path", type=str, default="new_partnet_mobility_dataset_correct_intr_meta.json")
     parser.add_argument("--mask_type", type=str, choices=["gt", "monst3r"], required=True)
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
     device = torch.device("cuda")
-    preprocess_dir = args.view_dir.replace("partnet_mobility", "exp_results/preprocessing")
-    prediction_dir = args.view_dir.replace("partnet_mobility", "exp_results/prediction")
-    coarse_predictor = CoarsePrediction(args.view_dir, preprocess_dir, prediction_dir, args.mask_type, device, args.seed)
+    data_loader = SimDataLoader(args.meta_file_path, args.view_dir, args.preprocess_dir, None)
+    coarse_predictor = CoarsePrediction(data_loader, args.prediction_dir, args.mask_type, device, args.seed)
     coarse_predictor.estimate_joint()
     coarse_predictor.save_prediction_results()
