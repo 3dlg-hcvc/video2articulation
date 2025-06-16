@@ -1,0 +1,3 @@
+[submodule "AutoSeg-SAM2"]
+	path = AutoSeg-SAM2
+	url = https://github.com/willipwk/AutoSeg-SAM2.git

@@ -55,6 +55,41 @@ project_root_directory
          ......
 ```
 
+## (Optional) Preprocessing
+This step will compute the video moving map with [MonST3R](https://github.com/Junyi42/monst3r) and video part segmentation with [automatic part segmentation](https://github.com/willipwk/AutoSeg-SAM2). It's a computational intensive work to process all the test videos in our synthetic dataset. Therefore, you can download the preprocessed data on [huggingface](https://huggingface.co/datasets/3dlg-hcvc/video2articulation) to skip this step. Otherwise, please continue.
+
+1. Update submodules
+   ```bash
+   git submodule init
+   git submodule update
+   ```
+
+2. Compute video moving map with [MonST3R](https://github.com/Junyi42/monst3r)
+
+3. Compute video part segmentation with [automatic part segmentation](https://github.com/willipwk/AutoSeg-SAM2)
+
+   Follow the instruction in `AutoSeg-SAM2` to prepare the environment. Inside the `AutoSeg-SAM2` directory, run
+   ```bash
+   python auto-mask-batch.py \
+   --video_path ../sim_data/partnet_mobility/Microwave/7265/joint_0_bg/view_0/rgb_reverse \
+   --output_dir ../sim_data/exp_results/preprocessing/Microwave/7265/joint_0_bg/view_0/video_segment_reverse \
+   --batch_size 10 \
+   --detect_stride 5 \
+   --level small \
+   --pred_iou_thresh 0.9 \
+   --stability_score_thresh 0.95 \
+   ```
+   Results are saved inside `{--output_dir}`.
+   You can also visualize the results for debug purpose.
+   ```bash
+   python visulization.py \
+   --video_path ../sim_data/partnet_mobility/Microwave/7265/joint_0_bg/view_0/rgb_reverse \
+   --output_dir ../sim_data/exp_results/preprocessing/Microwave/7265/joint_0_bg/view_0/
+   --level small
+   ```
+
+
+
 ## Coarse Prediction
 Our pipeline starts with coarse prediction.
 ```bash
