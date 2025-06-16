@@ -1,3 +1,6 @@
 [submodule "AutoSeg-SAM2"]
 	path = AutoSeg-SAM2
 	url = https://github.com/willipwk/AutoSeg-SAM2.git
+[submodule "monst3r"]
+	path = monst3r
+	url = https://github.com/willipwk/monst3r.git

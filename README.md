@@ -65,6 +65,15 @@ This step will compute the video moving map with [MonST3R](https://github.com/Ju
    ```
 
 2. Compute video moving map with [MonST3R](https://github.com/Junyi42/monst3r)
+   Follow the instruction in `monst3r` to prepare the environment. Inside the `monst3r` directory, run
+   ```bash
+   python demo.py \
+   --input ../sim_data/partnet_mobility/Microwave/7265/joint_0_bg/view_0/sample_rgb/ \
+   --output_dir ../sim_data/exp_results/preprocessing/Microwave/7265/joint_0_bg/view_0/ \
+   --seq_name monst3r \
+   --motion_mask_thresh 0.35
+   ```
+   You can change the `motion_mask_thresh` number to see different video moving map segmentation results. In our paper, we use 0.35.
 
 3. Compute video part segmentation with [automatic part segmentation](https://github.com/willipwk/AutoSeg-SAM2)
 
