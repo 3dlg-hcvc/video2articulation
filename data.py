@@ -329,13 +329,25 @@ class RealDataLoader(DataLoader):
             img_meta = json.load(f)
         self.intrinsics = np.array(img_meta['K']).reshape(3, 3).T
 
-        self.surface_dir = f"{norm_video_dir}/surface"
-
         self.sample_rgb_dir = f"{norm_video_dir}/sample_rgb"
         img_list = os.listdir(self.sample_rgb_dir)
         img_list.sort()
         self.sample_rgb_index = [int(file_name[:-4]) for file_name in os.listdir(self.sample_rgb_dir)]
         self.sample_rgb_index.sort()
+        
+        self.surface_dir = f"{norm_video_dir}/surface"
+        mesh_info_file = f"{self.surface_dir}/mesh_info.json"
+        with open(mesh_info_file, 'r') as f:
+            mesh_info = json.load(f)
+        self.mesh_align = np.array(mesh_info["alignmentTransform"]).reshape(4, 4).T
+        camera_dir = f"{self.surface_dir}/keyframes/corrected_cameras"
+        camera_files = glob.glob(f"{camera_dir}/*.json")
+        surface_img_camera_file = camera_files[0]
+        with open(surface_img_camera_file, 'r') as f:
+            surface_img_meta = json.load(f)
+        self.surface_img_intrinsics = np.array([[surface_img_meta["fx"], 0, surface_img_meta["cx"]],
+                                                [0, surface_img_meta["fy"], surface_img_meta["cy"]],
+                                                [0, 0, 1]])
 
         if preprocess_dir is not None:
             self.preprocess_dir = preprocess_dir
@@ -399,3 +411,21 @@ class RealDataLoader(DataLoader):
 
     def load_gt_joint_params(self) -> Tuple[str, np.ndarray, np.ndarray, np.ndarray]:
         return super().load_gt_joint_params()
+    
+
+    def load_surface_rgbd_cameras(self,) -> Tuple[List[np.ndarray], List[np.ndarray], List[str]]:
+        scan_img_list = glob.glob(f"{self.surface_dir}/keyframes/corrected_images/*.jpg")
+        scan_img_list.sort()
+        scan_imgs = []
+        scan_xyzs = []
+        camera_config_paths = []
+        for img_file in scan_img_list:
+            img = cv2.imread(img_file)
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            scan_imgs.append(img)
+            scan_depth = np.load(f"{self.prompt_depth_surface_dir}/{img_file[img_file.rfind('/') + 1:-4]}.npy")
+            scan_xyz = depth2xyz(scan_depth, self.surface_img_intrinsics, "opencv")
+            scan_xyzs.append(scan_xyz)
+            camera_config_paths.append(f"{self.surface_dir}/keyframes/corrected_cameras/{img_file[img_file.rfind('/') + 1:-4]}.json")
+        return scan_imgs, scan_xyzs, camera_config_paths
+    

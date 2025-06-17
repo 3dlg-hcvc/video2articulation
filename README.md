@@ -61,7 +61,8 @@ project_root_directory
 ## (Optional) Preprocessing
 <details>
 <summary>Click to expand</summary>
-This step will compute the video moving map with [MonST3R](https://github.com/Junyi42/monst3r) and video part segmentation with [automatic part segmentation](https://github.com/willipwk/AutoSeg-SAM2). It's a computational intensive work to process all the test videos in our synthetic dataset. Therefore, you can download the preprocessed data on [huggingface](https://huggingface.co/datasets/3dlg-hcvc/video2articulation) to skip this step. Otherwise, please continue.
+
+This step will compute the video moving map with [MonST3R](https://github.com/Junyi42/monst3r) and video part segmentation with [automatic part segmentation](https://github.com/willipwk/AutoSeg-SAM2). For real data, we also scale the depth map with [PromptDA](https://github.com/DepthAnything/PromptDA) and mask out hands from the interaction video with [Grounded-SAM-2](https://github.com/IDEA-Research/Grounded-SAM-2). It's a computational intensive work to process all the test videos in our synthetic dataset. Therefore, you can download the preprocessed data on [huggingface](https://huggingface.co/datasets/3dlg-hcvc/video2articulation) to skip this step. Otherwise, please continue.
 
 1. Update submodules
    ```bash
@@ -102,7 +103,7 @@ This step will compute the video moving map with [MonST3R](https://github.com/Ju
    --level small
    ```
 
-4. **Real Data Only**. Scale up original depth maps with [PromptDA](https://github.com/DepthAnything/PromptDA). In our paper we use iPhone 12 pro to capture real data. The original depth map is in 192 $\times$ 256, which is a very low resolution. Naively scale up the depth map via bilinear interpolation will produce noisy depth map. Therefore, we leverage PromptDA to scale up the depth map with relatively high quality. Inside the `PromptDA/` directory, run
+4. **Real Data Only**. Scale up original depth maps with [PromptDA](https://github.com/DepthAnything/PromptDA). In our paper, we use iPhone 12 pro to capture real data. The original depth map is in 192 $\times$ 256, which is a very low resolution. Naively scale up the depth map via bilinear interpolation will produce noisy depth map. Therefore, we leverage PromptDA to scale up the depth map with relatively high quality. Inside the `PromptDA/` directory, run
    ```bash
    python scale_depth.py \
    --image_dir ../real_data/raw_data/book/surface/keyframes/corrected_images/ \
@@ -114,6 +115,19 @@ This step will compute the video moving map with [MonST3R](https://github.com/Ju
    -depth_dir ../real_data/raw_data/book/depth/ \
    --save_dir ../real_data/exp_results/preprocessing/book/prompt_depth_video
    ```
+5. **Real Data Only**. Mask out hands and arms in theinteraction video with [Grounded-SAM-2](https://github.com/IDEA-Research/Grounded-SAM-2). In our paper, we discard hand information from the input video. Inside the `Grounded-SAM-2/` directory, run
+   ```bash
+   python mask_hand.py \
+   --video_frame_dir ../real_data/raw_data/book/rgb/ \
+   --save_dir ../real_data/exp_results/preprocessing/book/hand_mask/
+   ```
+6. **Real Data Only**. Align camera coordinates of the video to the coordinate for object surface reconstruction. Theoretically, we can add the initial frame of the video to the set of images for surface reconstruction. In that case, we can unify the coordinate for surface reconstruction and interaction video without extra effort. However, in our paper we use [Polycam](https://poly.cam/) for surface reconstruction and [Record3D](https://record3d.app/) to record interaction video. Therefore, we need to align them with a few more steps. Here we adopt a very simple strategy. Since we have both RGB images and depth maps for surface reconstruction and interaction video, we just compute feature matching between the first video frame and images used for surface reconstruction. We use the image pair with most reliable matches and compute SE3 transformation between them. This provides the transformation from camera poses in the interaction video to the surface reconstruction coordinate.
+   ```bash
+   python align_surface_video.py \
+   --view_dir real_data/raw_data/book/ \
+   --preprocess_dir real_data/exp_results/preprocessing/book/
+   ```
+
 
 </details>
 

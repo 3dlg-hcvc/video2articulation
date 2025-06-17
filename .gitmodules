@@ -7,3 +7,6 @@
 [submodule "PromptDA"]
 	path = PromptDA
 	url = https://github.com/willipwk/PromptDA.git
+[submodule "Grounded-SAM-2"]
+	path = Grounded-SAM-2
+	url = https://github.com/willipwk/Grounded-SAM-2.git
