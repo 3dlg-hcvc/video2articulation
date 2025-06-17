@@ -9,11 +9,11 @@ from tqdm import tqdm
 from typing import Tuple, List, Dict
 
 from utils import set_seed, estimate_se3_transformation
-from data import SimDataLoader
+from data import DataLoader, SimDataLoader, RealDataLoader
 
 
 class CoarsePrediction():
-    def __init__(self, data_loader: SimDataLoader, prediction_dir: str, mask_type: str, device: torch.device, seed: int = 0):
+    def __init__(self, data_loader: DataLoader, prediction_dir: str, mask_type: str, device: torch.device, seed: int = 0):
         self.data_loader = data_loader
         self.mask_type = mask_type
         self.device = device
@@ -22,10 +22,15 @@ class CoarsePrediction():
 
         self.H, self.W = data_loader.H, data_loader.W
         self.rgb_list, self.xyz_list =  self.data_loader.load_rgbd_video()
-        self.gt_camera_se3 = self.data_loader.load_gt_camera_pose_se3()
-        self.camera2label = [self.gt_camera_se3[0]]
+        if isinstance(data_loader, SimDataLoader):
+            self.gt_camera_se3 = self.data_loader.load_gt_camera_pose_se3()
+        self.camera2label = [self.data_loader.load_gt_init_camera_pose_se3()]
 
-        if mask_type == "gt":
+        if isinstance(data_loader, RealDataLoader):
+            self.obj_mask_list = self.data_loader.load_obj_mask()
+        else:
+            self.obj_mask_list = None
+        if isinstance(data_loader, SimDataLoader) and mask_type == "gt":
             self.dynamic_mask_list = self.data_loader.load_gt_moving_map()
         else:
             self.dynamic_mask_list = self.data_loader.load_monst3r_moving_map()
@@ -85,7 +90,12 @@ class CoarsePrediction():
             mkpts1 = mkpts1[match_mask].astype(np.uint32)
 
             dynamic_mask = self.dynamic_mask_list[i]
-            static_mask = ~dynamic_mask
+            if self.obj_mask_list is not None:
+                obj_mask = self.obj_mask_list[i]
+                static_mask = ((~dynamic_mask) & obj_mask)
+                static_mask = ~dynamic_mask
+            else:
+                static_mask = ~dynamic_mask
             static_index = np.nonzero(static_mask[mkpts0[:, 1], mkpts0[:, 0]])[0]
             static_pts0 = mkpts0[static_index]
             static_pts1 = mkpts1[static_index]
@@ -318,6 +328,9 @@ class CoarsePrediction():
                 mkpts1 = mkpts1[match_mask].astype(np.uint32)
 
                 dynamic_mask = self.dynamic_mask_list[i]
+                if self.obj_mask_list is not None:
+                    obj_mask = self.obj_mask_list[i]
+                    dynamic_mask = dynamic_mask & obj_mask
                 dynamic_index = np.nonzero(dynamic_mask[mkpts0[:, 1], mkpts0[:, 0]])[0]
                 dynamic_pts0 = mkpts0[dynamic_index]
                 dynamic_pts1 = mkpts1[dynamic_index]
@@ -421,16 +434,23 @@ class CoarsePrediction():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--data_type", type=str, choices=["sim", "real"], required=True)
     parser.add_argument("--view_dir", type=str, required=True)
     parser.add_argument("--preprocess_dir", type=str, required=True)
     parser.add_argument("--prediction_dir", type=str, required=True)
-    parser.add_argument("--meta_file_path", type=str, default="new_partnet_mobility_dataset_correct_intr_meta.json")
+    parser.add_argument("--meta_file_path", type=str, default="new_partnet_mobility_dataset_correct_intr_meta.json", help="Only required for sim data, the path to the metadata file.")
     parser.add_argument("--mask_type", type=str, choices=["gt", "monst3r"], required=True)
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
     device = torch.device("cuda")
-    data_loader = SimDataLoader(args.meta_file_path, args.view_dir, args.preprocess_dir, None)
+    if args.data_type == "sim":
+        data_loader = SimDataLoader(args.view_dir, args.preprocess_dir, args.meta_file_path, None)
+    elif args.data_type == "real":
+        data_loader = RealDataLoader(args.view_dir, args.preprocess_dir)
+    else:
+        raise ValueError("Unsupported data type. Choose 'sim' or 'real'.")
+    # data_loader = SimDataLoader(args.meta_file_path, args.view_dir, args.preprocess_dir, None)
     coarse_predictor = CoarsePrediction(data_loader, args.prediction_dir, args.mask_type, device, args.seed)
     coarse_predictor.estimate_joint()
     coarse_predictor.save_prediction_results()

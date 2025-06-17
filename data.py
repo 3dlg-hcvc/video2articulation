@@ -1,7 +1,7 @@
 import numpy as np
 import cv2
 from PIL import Image
-import trimesh
+import open3d as o3d
 from scipy.spatial.transform import Rotation as R
 from yourdfpy import URDF
 import pickle
@@ -16,8 +16,102 @@ from utils import find_movable_part, precompute_object2label, depth2xyz, precomp
 from data_utils import descendant_links, load_joint_cfg, sample_urdf_pcd, remove_overlay
 
 
-class SimDataLoader:
-    def __init__(self, meta_file_path: str, view_dir: str, preprocess_dir: str, partnet_mobility_dir: str = "partnet-mobility-v0"):
+class DataLoader:
+    W: int
+    H: int
+    
+    video_dir: str
+    sample_rgb_dir: str
+    sample_rgb_index: List[int]
+    segment_dir: str
+    intrinsics: np.ndarray
+
+    surface_dir: str
+
+    preprocess_dir: str
+    monst3r_dir: str
+    part_segment_dir: str
+
+
+    def load_obj_surface(self,) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | Tuple[np.ndarray, np.ndarray]:
+        pass
+
+
+    def load_rgbd_video(self,) -> Tuple[List[np.ndarray], List[np.ndarray]]:
+        pass
+
+
+    def load_monst3r_moving_map(self,) -> List[np.ndarray]:
+        monst3r_mask_list = []
+        for i in range(len(self.sample_rgb_index)):
+            pred_mask_img = Image.open(f"{self.monst3r_dir}/dynamic_mask_{i}.png").convert('L')
+            pred_mask_img = pred_mask_img.resize((self.W, self.H), Image.BICUBIC)
+            pred_mask = np.array(pred_mask_img)
+            pred_mask = (pred_mask / 255.).astype(np.bool_)
+            monst3r_mask_list.append(pred_mask)
+        return monst3r_mask_list
+    
+
+    def load_part_segmentation(self, obj_mask: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        segments_map_list = glob.glob(f"{self.part_segment_dir}/small/final-output/*.npz")
+        segments_map_list.sort(key=lambda x: int(x[x.rfind('_') + 1:-4]), reverse=True)
+        segments_map_list = [segments_map_list[i] for i in self.sample_rgb_index]
+        origin_segments_list = []
+        for segments_map in segments_map_list:
+            origin_segments_list.append(np.load(segments_map)['a'][:, 0, :, :])
+        non_overlap_segments_list = remove_overlay(origin_segments_list)
+
+        initial_segments = non_overlap_segments_list[0]
+        old_segment_id_list = []
+        initial_obj_mask = obj_mask[0]
+        part_segments_list = []
+        old_part_segments_list = []
+        for segment_id in range(initial_segments.shape[0]):
+            part_segment0 = initial_segments[segment_id]
+            part_occupation = np.logical_and(part_segment0, initial_obj_mask)
+            if np.sum(part_occupation) > 100:
+                old_segment_id_list.append(segment_id)
+
+        for frame_id, segments_map in enumerate(segments_map_list):
+            part_segments = non_overlap_segments_list[frame_id]
+            obj_segments = obj_mask[frame_id] # H, W
+            part_segments = np.logical_and(part_segments[old_segment_id_list], obj_segments[np.newaxis, ...])
+            part_segments_list.append(part_segments) # old_parts, H, W
+            old_part_segments = np.zeros_like(obj_segments, dtype=np.bool_)
+            for part_id in range(part_segments.shape[0]):
+                old_part_segments = np.logical_or(old_part_segments, part_segments[part_id])
+            old_part_segments_list.append(old_part_segments) # H, W
+
+        old_part_segments_list = np.stack(old_part_segments_list) # N, H, W
+        part_segments_list = np.stack(part_segments_list) # N, old_parts, H, W
+        return part_segments_list, old_part_segments_list
+    
+
+    def load_gt_init_camera_pose_se3(self,) -> np.ndarray:
+        pass
+
+    def load_gt_camera_pose_se3(self,) -> np.ndarray:
+        pass
+
+
+    def load_gt_moving_map(self,) -> List[np.ndarray]:
+        pass
+
+
+    def load_obj_mask(self,) -> np.ndarray:
+        pass
+
+
+    def load_gt_pcd(self,) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        pass
+
+
+    def load_gt_joint_params(self,) -> Tuple[str, np.ndarray, np.ndarray, np.ndarray]:
+        pass
+
+
+class SimDataLoader(DataLoader):
+    def __init__(self, view_dir: str, preprocess_dir: str, meta_file_path: str = "new_partnet_mobility_dataset_correct_intr_meta.json", partnet_mobility_dir: str = "partnet-mobility-v0"):
         if meta_file_path is not None:
             self.joint_type_map = {"hinge": "revolute", "slider": "prismatic"}
             with open(meta_file_path, "r") as f:
@@ -26,7 +120,7 @@ class SimDataLoader:
         self.H = 480
 
         norm_view_dir = os.path.normpath(view_dir)
-        self.view_dir = norm_view_dir
+        self.video_dir = norm_view_dir
         self.joint_data_dir = os.path.dirname(norm_view_dir)
         print(self.joint_data_dir)
         folder_names = norm_view_dir.strip("/").split("/")
@@ -56,6 +150,7 @@ class SimDataLoader:
         self.sample_rgb_index.sort()
 
         if preprocess_dir is not None:
+            self.preprocess_dir = preprocess_dir
             self.monst3r_dir = f"{preprocess_dir}/monst3r"
             self.part_segment_dir = f"{preprocess_dir}/video_segment_reverse"
 
@@ -112,65 +207,33 @@ class SimDataLoader:
 
 
     def load_rgbd_video(self,) -> Tuple[List[np.ndarray], List[np.ndarray]]:
-        depth_list = glob.glob(f"{self.view_dir}/depth/*.npz")
+        depth_list = glob.glob(f"{self.video_dir}/depth/*.npz")
         depth_list.sort()
         xyz = []
-        rgb_list = glob.glob(f"{self.view_dir}/rgb/*.jpg")
+        rgb_list = glob.glob(f"{self.video_dir}/rgb/*.jpg")
         rgb_list.sort()
         rgb = []
         for i in self.sample_rgb_index:
             depth = np.load(depth_list[i])['a']
-            xyz.append(depth2xyz(depth, self.intrinsics)) # in opengl coordinate
+            xyz.append(depth2xyz(depth, self.intrinsics, "opengl")) # in opengl coordinate
             bgr = cv2.imread(rgb_list[i])
             rgb.append(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
         return rgb, xyz
-
-
-    def load_monst3r_moving_map(self,) -> List[np.ndarray]:
-        monst3r_mask_list = []
-        for i in range(len(self.sample_rgb_index)):
-            pred_mask_img = Image.open(f"{self.monst3r_dir}/dynamic_mask_{i}.png").convert('L')
-            pred_mask_img = pred_mask_img.resize((self.W, self.H), Image.BICUBIC)
-            pred_mask = np.array(pred_mask_img)
-            pred_mask = (pred_mask / 255.).astype(np.bool_)
-            monst3r_mask_list.append(pred_mask)
-        return monst3r_mask_list
     
 
-    def load_part_segmentation(self, obj_mask: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        segments_map_list = glob.glob(f"{self.part_segment_dir}/small/final-output/*.npz")
-        segments_map_list.sort(key=lambda x: int(x[x.rfind('_') + 1:-4]), reverse=True)
-        segments_map_list = [segments_map_list[i] for i in self.sample_rgb_index]
-        origin_segments_list = []
-        for segments_map in segments_map_list:
-            origin_segments_list.append(np.load(segments_map)['a'][:, 0, :, :])
-        non_overlap_segments_list = remove_overlay(origin_segments_list)
+    def load_monst3r_moving_map(self):
+        return super().load_monst3r_moving_map()
+    
 
-        initial_segments = non_overlap_segments_list[0]
-        old_segment_id_list = []
-        initial_obj_mask = obj_mask[0]
-        part_segments_list = []
-        old_part_segments_list = []
-        for segment_id in range(initial_segments.shape[0]):
-            part_segment0 = initial_segments[segment_id]
-            part_occupation = np.logical_and(part_segment0, initial_obj_mask)
-            if np.sum(part_occupation) > 100:
-                old_segment_id_list.append(segment_id)
+    def load_part_segmentation(self, obj_mask):
+        return super().load_part_segmentation(obj_mask)
 
-        for frame_id, segments_map in enumerate(segments_map_list):
-            part_segments = non_overlap_segments_list[frame_id]
-            obj_segments = obj_mask[frame_id] # H, W
-            part_segments = np.logical_and(part_segments[old_segment_id_list], obj_segments[np.newaxis, ...])
-            part_segments_list.append(part_segments) # old_parts, H, W
-            old_part_segments = np.zeros_like(obj_segments, dtype=np.bool_)
-            for part_id in range(part_segments.shape[0]):
-                old_part_segments = np.logical_or(old_part_segments, part_segments[part_id])
-            old_part_segments_list.append(old_part_segments) # H, W
 
-        old_part_segments_list = np.stack(old_part_segments_list) # N, H, W
-        part_segments_list = np.stack(part_segments_list) # N, old_parts, H, W
-        return part_segments_list, old_part_segments_list
-
+    def load_gt_init_camera_pose_se3(self,) -> np.ndarray:
+        gt_camera_pose = np.load(f"{self.view_dir}/camera_pose.npy")
+        gt_init_camera_se3= precompute_camera2label(gt_camera_pose[0], self.object2label)
+        return gt_init_camera_se3
+    
 
     def load_gt_camera_pose_se3(self,) -> np.ndarray:
         gt_camera_pose = np.load(f"{self.view_dir}/camera_pose.npy")
@@ -251,3 +314,88 @@ class SimDataLoader:
         gt_joint_value = np.load(f"{self.joint_data_dir}/gt_joint_value.npy")
         sample_gt_joint_value = gt_joint_value[self.sample_rgb_index]
         return gt_joint_type, np.array(gt_joint_axis), np.array(gt_joint_pos), sample_gt_joint_value
+    
+
+class RealDataLoader(DataLoader):
+    def __init__(self, video_dir: str, preprocess_dir: str):
+        self.H = 960
+        self.W = 720
+
+        norm_video_dir = os.path.normpath(video_dir)
+        self.video_dir = norm_video_dir
+        self.sample_rgb_dir = f"{norm_video_dir}/sample_rgb"
+        meta_file = f"{norm_video_dir}/metadata.json"
+        with open(meta_file, 'r') as f:
+            img_meta = json.load(f)
+        self.intrinsics = np.array(img_meta['K']).reshape(3, 3).T
+
+        self.surface_dir = f"{norm_video_dir}/surface"
+
+        self.sample_rgb_dir = f"{norm_video_dir}/sample_rgb"
+        img_list = os.listdir(self.sample_rgb_dir)
+        img_list.sort()
+        self.sample_rgb_index = [int(file_name[:-4]) for file_name in os.listdir(self.sample_rgb_dir)]
+        self.sample_rgb_index.sort()
+
+        if preprocess_dir is not None:
+            self.preprocess_dir = preprocess_dir
+            self.hand_segment_dir = f"{preprocess_dir}/hand_mask"
+            self.monst3r_dir = f"{preprocess_dir}/monst3r"
+            self.part_segment_dir = f"{preprocess_dir}/video_segment_reverse"
+            self.prompt_depth_video_dir = f"{preprocess_dir}/prompt_depth_video"
+            self.prompt_depth_surface_dir = f"{preprocess_dir}/prompt_depth_surface"
+
+
+    def load_obj_surface(self, sample_num: int = 480 * 64) -> Tuple[np.ndarray, np.ndarray]:
+        surface_pcd = o3d.io.read_point_cloud(f"{self.surface_dir}/surface.ply")
+        surface_xyz = np.asarray(surface_pcd.points)
+        surface_rgb = np.asarray(surface_pcd.colors) * 255
+        surface_rgb = surface_rgb.astype(np.uint8)
+        sample_index = np.random.choice(np.arange(surface_rgb.shape[0]), sample_num, replace=False)
+        surface_rgb = surface_rgb[sample_index]
+        surface_xyz = surface_xyz[sample_index]
+        return surface_rgb, surface_xyz
+    
+
+    def load_rgbd_video(self,) -> Tuple[List[np.ndarray], List[np.ndarray]]:
+        depth_list = glob.glob(f"{self.prompt_depth_video_dir}/*.npy")
+        depth_list.sort()
+        xyz = []
+        rgb_list = glob.glob(f"{self.video_dir}/rgb/*.jpg")
+        rgb_list.sort()
+        rgb = []
+        for i in self.sample_rgb_index:
+            depth = np.load(depth_list[i])
+            xyz.append(depth2xyz(depth, self.intrinsics, "opencv")) # in opencv coordinate
+            bgr = cv2.imread(rgb_list[i])
+            rgb.append(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
+        return rgb, xyz
+    
+
+    def load_gt_init_camera_pose_se3(self,) -> np.ndarray:
+        camera2label = np.load(f"{self.preprocess_dir}/cam2world.npy")
+        return camera2label
+    
+
+    def load_gt_camera_pose_se3(self,) -> np.ndarray:
+        super().load_gt_camera_pose_se3()
+
+    
+    def load_gt_moving_map(self) -> List[np.ndarray]:
+        return super().load_gt_moving_map()
+
+
+    def load_obj_mask(self,) -> np.ndarray:
+        obj_mask_list = []
+        for i in range(len(self.sample_rgb_index)):
+            hand_mask = np.load(f"{self.hand_segment_dir}/{self.sample_rgb_index[i]:06d}.npy")
+            obj_mask_list.append(~hand_mask)
+        return np.stack(obj_mask_list)
+        
+
+    def load_gt_pcd(self,) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        super().load_gt_pcd()
+    
+
+    def load_gt_joint_params(self) -> Tuple[str, np.ndarray, np.ndarray, np.ndarray]:
+        return super().load_gt_joint_params()

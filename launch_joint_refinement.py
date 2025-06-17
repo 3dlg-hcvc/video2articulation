@@ -6,18 +6,19 @@ import time
 import os
 
 
-def refine(exp_name:str, view_dir: str, preprocess_dir: str, prediction_dir: str, meta_file_path: str, mask_type: str, joint: str, loss: str, steps: int, lr: float, device: str, seed: int, vis: bool):
-    cmd = f"python joint_refinement.py --exp_name {exp_name} --view_dir {view_dir} --preprocess_dir {preprocess_dir} --prediction_dir {prediction_dir} --meta_file_path {meta_file_path} \
+def refine(data_type: str, exp_name:str, view_dir: str, preprocess_dir: str, prediction_dir: str, meta_file_path: str, 
+           mask_type: str, joint: str, loss: str, steps: int, lr: float, device: str, seed: int, vis: bool):
+    cmd = f"python joint_refinement.py --data_type {data_type} --exp_name {exp_name} --view_dir {view_dir} --preprocess_dir {preprocess_dir} --prediction_dir {prediction_dir} --meta_file_path {meta_file_path} \
             --mask_type {mask_type} --joint {joint} --loss {loss} --steps {steps} --lr {lr} --device {device} --seed {seed}"
     if vis:
         cmd += " --vis"
     os.system(cmd)
-    
-    
-def worker(device_id: str, exp_name:str, view_dir: str, preprocess_dir: str, prediction_dir: str, meta_file_path: str, mask_type: str, joint: str, loss: str, steps: int, lr: float, seed: int, vis: bool):
+
+
+def worker(device_id: str, data_type: str, exp_name:str, view_dir: str, preprocess_dir: str, prediction_dir: str, meta_file_path: str, mask_type: str, joint: str, loss: str, steps: int, lr: float, seed: int, vis: bool):
     device = f"cuda:{device_id}"
     print(f"Starting job on {device} with {view_dir} on {joint} joint\n")
-    refine(exp_name, view_dir, preprocess_dir, prediction_dir, meta_file_path, mask_type, joint, loss, steps, lr, device, seed, vis)
+    refine(data_type, exp_name, view_dir, preprocess_dir, prediction_dir, meta_file_path, mask_type, joint, loss, steps, lr, device, seed, vis)
     print(f"Finished job on {device} with {view_dir} on {joint} joint\n")
     # This worker function starts a job and returns when it's done.
     
@@ -57,6 +58,7 @@ def dispatch_jobs(jobs, executor):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--data_type", type=str, choices=["sim", "real"], required=True)
     parser.add_argument("--exp_name", type=str, required=True)
     parser.add_argument("--view_dir", type=str, required=True)
     parser.add_argument("--preprocess_dir", type=str, required=True)
@@ -70,6 +72,7 @@ if __name__ == "__main__":
     parser.add_argument("--vis", action="store_true", default=False)
     args = parser.parse_args()
 
+    data_type_list = [args.data_type]
     exp_name_list = [args.exp_name]
     view_dir_list = [args.view_dir]
     preprocess_dir_list = [args.preprocess_dir]
@@ -82,7 +85,8 @@ if __name__ == "__main__":
     lr_list = [args.lr]
     seed_list = [args.seed]
     vis_list = [args.vis]
-    jobs = list(itertools.product(exp_name_list, view_dir_list, preprocess_dir_list, prediction_dir_list, meta_file_path_list, mask_type_list, joint_type_list, loss_list, steps_list, lr_list, seed_list, vis_list))
+    jobs = list(itertools.product(data_type_list, exp_name_list, view_dir_list, preprocess_dir_list, prediction_dir_list, meta_file_path_list, 
+                                  mask_type_list, joint_type_list, loss_list, steps_list, lr_list, seed_list, vis_list))
     # Using ThreadPoolExecutor to manage the thread pool
     with ThreadPoolExecutor(max_workers=8) as executor:
         dispatch_jobs(jobs, executor)

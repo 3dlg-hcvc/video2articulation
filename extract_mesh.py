@@ -6,7 +6,7 @@ import os
 from pycg import vis
 import argparse
 
-from data import SimDataLoader
+from data import DataLoader, SimDataLoader, RealDataLoader
 
 
 def main(args):
@@ -14,14 +14,19 @@ def main(args):
     reconstructor = nksr.Reconstructor(device)
 
     # init pc
-    data_loader = SimDataLoader(None, args.view_dir, None, None)
-    surface_rgb_np, surface_xyz_np = data_loader.load_obj_surface(sample_num=480 * 640, return_segments=False)
+    if args.data_type == "sim":
+        data_loader = SimDataLoader(args.view_dir, None, None, None)
+    else:
+        data_loader = RealDataLoader(args.view_dir, args.preprocess_dir)
+    surface_rgb_np, surface_xyz_np = data_loader.load_obj_surface(sample_num=480 * 640)
     surface_rgb = torch.from_numpy(surface_rgb_np).to(device) / 255. # sample_num * 3
     surface_xyz = torch.from_numpy(surface_xyz_np).to(device) # sample_num * 3
 
     # video first pc
     rgb_list, xyz_list = data_loader.load_rgbd_video()
     xyz = xyz_list[0].reshape(-1, 3)  # H*W, 3
+    camera_init = data_loader.load_gt_init_camera_pose_se3()
+    xyz = np.dot(xyz, camera_init[:3, :3].T) + camera_init[:3, 3]  # H*W, 3
 
     o3d_surface = o3d.geometry.PointCloud()
     o3d_surface.points = o3d.utility.Vector3dVector(surface_xyz_np)
@@ -111,7 +116,9 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--data_type", type=str, choices=["sim", "real"], required=True)
     parser.add_argument("--view_dir", type=str, required=True)
+    parser.add_argument("--preprocess_dir", type=str, default=None, help="Only required for real data, the directory where the preprocessed data is stored.")
     parser.add_argument("--refinement_results_dir", type=str, required=True)
     parser.add_argument("--device", type=str, default="cuda:0")
     args = parser.parse_args()

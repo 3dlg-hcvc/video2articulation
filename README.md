@@ -47,6 +47,10 @@ project_root_directory
                |__partnet_mobility
                |__exp_results
                         |__preprocessing
+         |__real_data
+               |__raw_data
+               |__exp_results
+                        |__preprocessing
          |__joint_coarse_prediction.py
          |__joint_refinement.py
          |__launch_joint_refinement.py
@@ -54,8 +58,9 @@ project_root_directory
          |__partnet_mobility_data_split.yaml
          ......
 ```
-
 ## (Optional) Preprocessing
+<details>
+<summary>Click to expand</summary>
 This step will compute the video moving map with [MonST3R](https://github.com/Junyi42/monst3r) and video part segmentation with [automatic part segmentation](https://github.com/willipwk/AutoSeg-SAM2). It's a computational intensive work to process all the test videos in our synthetic dataset. Therefore, you can download the preprocessed data on [huggingface](https://huggingface.co/datasets/3dlg-hcvc/video2articulation) to skip this step. Otherwise, please continue.
 
 1. Update submodules
@@ -97,12 +102,13 @@ This step will compute the video moving map with [MonST3R](https://github.com/Ju
    --level small
    ```
 
-
+</details>
 
 ## Coarse Prediction
 Our pipeline starts with coarse prediction.
 ```bash
 python joint_coarse_prediction.py \
+--data_type sim \
 --view_dir sim_data/partnet_mobility/Microwave/7265/joint_0_bg/view_0/ \
 --preprocess_dir sim_data/exp_results/preprocessing/Microwave/7265/joint_0_bg/view_0/ \
 --prediction_dir sim_data/exp_results/prediction/Microwave/7265/joint_0_bg/view_0/ \
@@ -115,7 +121,9 @@ After running the coarse prediction module, the results are saved inside `sim_da
 ## Refinement
 The second stage is refinement. Our refinement module attempts to optimize joint parameters of a single type of joint. Therefore, you need to run this module twice to get final prediction results.
 ```bash
-python launch_joint_refinement.py --exp_name refinement \
+python launch_joint_refinement.py \
+--data_type sim \
+--exp_name refinement \
 --view_dir sim_data/partnet_mobility/Microwave/7265/joint_0_bg/view_0/ \
 --preprocess_dir sim_data/exp_results/preprocessing/Microwave/7265/joint_0_bg/view_0/ \
 --prediction_dir sim_data/exp_results/prediction/Microwave/7265/joint_0_bg/view_0/ \
@@ -129,14 +137,14 @@ We use [NKSR](https://github.com/nv-tlabs/NKSR) for mesh reconstruction. Please 
 
 In the NKSR environment, run
 ```bash
-python extract_mesh.py \
+python extract_mesh.py --data_type sim \
 --view_dir sim_data/partnet_mobility/Microwave/7265/joint_0_bg/view_0/ \ 
 --refinement_results_dir sim_data/exp_results/prediction/Microwave/7265/joint_0_bg/view_0/refinement/monst3r/chamfer/0/
 ```
 It will reconstruct the whole mesh, the mesh of the moving part and static part of the object. It also samples 10000 points from the surface of the mesh for evaluating geometric reconstruction accuracy against the ground truth mesh. Results are saved inside `sim_data/exp_results/prediction/`. Note that sometimes this step needs large CUDA memory. We recommend using GPU with CUDA memory equal or larger than 48GB, such as RTX A6000.
 
 ## Evaluation
-Finally, you can run `evaluate.py` to evaluate all the prediction results. 
+Finally, you can run `evaluate.py` to evaluate all the prediction results. This is only for synthetic data.
 ```bash
 python evaluate.py \
 --view_dir sim_data/partnet_mobility/Microwave/7265/joint_0_bg/view_0/ \ 

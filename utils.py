@@ -48,7 +48,7 @@ def inverse_transformation(T: np.ndarray | torch.Tensor) -> np.ndarray | torch.T
     return T_inv
 
 
-def depth2xyz(depth_image: np.ndarray, intrinsics: np.ndarray) -> np.ndarray:
+def depth2xyz(depth_image: np.ndarray, intrinsics: np.ndarray, cam_type: str) -> np.ndarray:
     # Get the shape of the depth image
     H, W = depth_image.shape
 
@@ -81,7 +81,8 @@ def depth2xyz(depth_image: np.ndarray, intrinsics: np.ndarray) -> np.ndarray:
     # Stack the x, y, z values into a 3D point cloud
     point_cloud = np.vstack((x, y, z)).T
 
-    point_cloud = point_cloud * np.array([1, -1, -1])
+    if cam_type == "opengl":
+        point_cloud = point_cloud * np.array([1, -1, -1])
 
     # Reshape the point cloud to the original depth image shape [H, W, 3]
     point_cloud = point_cloud.reshape(H, W, 3)

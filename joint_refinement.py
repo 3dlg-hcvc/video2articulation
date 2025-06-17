@@ -16,35 +16,41 @@ import yaml
 from typing import Tuple, List
 
 from utils import set_seed
-from data import SimDataLoader
+from data import DataLoader, SimDataLoader, RealDataLoader
 
 
 class BundleAdjustment(torch.nn.Module):
-    def __init__(self, data_loader: SimDataLoader, prediction_dir: str, mask_type: str, 
+    def __init__(self, data_loader: DataLoader, prediction_dir: str, mask_type: str, 
                  joint_type: str, lr: float, loss_func: str, opt_steps: int, log_dir: str, 
                  device: torch.device, seed: int, vis_pcd: bool = False):
         super(BundleAdjustment, self).__init__()
         set_seed(seed)
         self.device = device
         self.data_loader = data_loader
+        self.data_type = "sim" if isinstance(data_loader, SimDataLoader) else "real"
         # init pcd
-        surface_rgb_np, surface_xyz_np, surface_dynamic_np, surface_static_np = self.data_loader.load_obj_surface(sample_num=480 * 64, return_segments=True)
+        if self.data_type == "sim" and vis_pcd:
+            surface_rgb_np, surface_xyz_np, surface_dynamic_np, surface_static_np = self.data_loader.load_obj_surface(sample_num=480 * 64, return_segments=True)
+            self.surface_dynamic_xyz = torch.from_numpy(surface_dynamic_np).to(device).to(torch.float64) # sample_num * 3
+            self.surface_static_xyz = torch.from_numpy(surface_static_np).to(device).to(torch.float64) # sample_num * 3
+        else:
+            surface_rgb_np, surface_xyz_np = self.data_loader.load_obj_surface(sample_num=480 * 64)
         self.surface_rgb = torch.from_numpy(surface_rgb_np).to(device).to(torch.float64) # sample_num * 3
         self.surface_xyz = torch.from_numpy(surface_xyz_np).to(device).to(torch.float64) # sample_num * 3
-        self.surface_dynamic_segment = torch.from_numpy(surface_dynamic_np).to(device).to(torch.float64) # sample_num * 3
-        self.surface_static_segment = torch.from_numpy(surface_static_np).to(device).to(torch.float64) # sample_num * 3
         # video img & pcd
         rgb_list, xyz_list = self.data_loader.load_rgbd_video()
         self.xyz = torch.from_numpy(np.stack(xyz_list)).to(device) # N, H, W, 3
         self.rgb = torch.from_numpy(np.stack(rgb_list)).to(device) # N, H, W, 3
         N, H, W, C = self.rgb.shape
         # gt moving map & obj mask
-        gt_moving_map_list = self.data_loader.load_gt_moving_map()
-        self.gt_moving_map_bool = torch.from_numpy(np.stack(gt_moving_map_list)).to(device)
+        if self.data_type == "sim":
+            gt_moving_map_list = self.data_loader.load_gt_moving_map()
+            self.gt_moving_map_bool = torch.from_numpy(np.stack(gt_moving_map_list)).to(device)
         obj_mask_list = self.data_loader.load_obj_mask()
         self.obj_mask_bool = torch.from_numpy(np.stack(obj_mask_list)).to(device) # N, H, W
         # gt camera pose
-        self.gt_camera_se3 = self.data_loader.load_gt_camera_pose_se3()
+        if self.data_type == "sim":
+            self.gt_camera_se3 = self.data_loader.load_gt_camera_pose_se3()
 
         # optimize parameter
         ## camera pose
@@ -90,13 +96,13 @@ class BundleAdjustment(torch.nn.Module):
                 part_moving_occupation += np.sum(np.logical_and(part_segments, pred_mask_bool[np.newaxis, ...]), axis=(1, 2))
             part_moving_occupation = part_moving_occupation / np.sum(part_segments_np, axis=(0, 2, 3))
             self.moving_map_vec = torch.nn.Parameter(torch.from_numpy(part_moving_occupation).to(device), requires_grad=True) # old_parts,
-        elif mask_type == "gt":
+        elif self.data_type == "sim" and mask_type == "gt":
             self.moving_map = self.gt_moving_map_bool.clone().to(torch.float64)
         
         ## optimizer
         if mask_type == "monst3r":
             optimize_params = [{"params": (self.camera_pose, self.joint_axis, self.joint_pos, self.joint_state, self.moving_map_vec)}]
-        elif mask_type == "gt":
+        elif self.data_type == "sim" and mask_type == "gt":
             optimize_params = [{"params": (self.camera_pose, self.joint_axis, self.joint_pos, self.joint_state)}]
         self.optimizer = torch.optim.Adam(optimize_params, lr=lr)
         self.steps = opt_steps
@@ -127,45 +133,6 @@ class BundleAdjustment(torch.nn.Module):
                        "lr": self.lr}
         with open(f"{self.log_dir}/opt_config.yaml", "w") as f:
             yaml.dump(config_dict, f)
-
-
-    def remove_overlay(self, masks: List[np.ndarray]) -> List[np.ndarray]:
-        random_segment_scalar = np.random.rand(masks[0].shape[0], 1, 1) * 10
-        part_id_list = []
-        tolerance = 1e-7
-        full_new_segments = []
-        erosion_kernel = np.ones((5, 5), np.uint8) 
-
-        for frame_id, mask in enumerate(masks): # iterate each frame
-            random_segments = mask * random_segment_scalar
-            blend_segments = np.sum(random_segments, axis=0) # H, W
-            current_part_id_array = np.unique(blend_segments)
-            current_part_id_array = current_part_id_array[current_part_id_array > 0] # remove 0
-            # check new part id
-            for current_part_id in current_part_id_array:
-                new_id = True
-                for exist_layer, old_part_id in enumerate(part_id_list):
-                    if abs(old_part_id - current_part_id) < tolerance: # find old part id
-                        new_id = False
-                        break
-                if new_id:
-                    # new_id_list.append(current_part_id)
-                    part_id_list.append(current_part_id)
-            new_segment_list = []
-            for layer, part_id in enumerate(part_id_list):
-                new_part_segment = (np.abs(blend_segments - part_id) < tolerance)
-                new_part_segment = new_part_segment.astype(np.uint8) * 255
-                erode_new_part_segment = cv2.erode(new_part_segment, erosion_kernel)
-                erode_new_part_segment = (erode_new_part_segment // 255).astype(np.bool_)
-                new_segment_list.append(erode_new_part_segment)
-            new_segment = np.stack(new_segment_list, axis=0) # current_parts(will change), H, W
-            full_new_segments.append(new_segment)
-        for frame_id in range(len(full_new_segments)):
-            if full_new_segments[frame_id].shape[0] != len(part_id_list):
-                padding_matrix = np.zeros((len(part_id_list) - full_new_segments[frame_id].shape[0], full_new_segments[frame_id].shape[1], full_new_segments[frame_id].shape[2]))
-                padding_new_segments = np.vstack([full_new_segments[frame_id], padding_matrix])
-                full_new_segments[frame_id] = padding_new_segments
-        return full_new_segments
     
 
     def chamfer_loss(self,) -> torch.Tensor:
@@ -296,21 +263,29 @@ class BundleAdjustment(torch.nn.Module):
                 
                 self.best_loss = eval_loss.detach().cpu().item()
 
-            joint_ori_error, joint_pos_error, joint_state_error, cam_rotation_error, cam_translation_error, soft_iou, valid = self.compute_estimation_error(gt_joint_type, gt_joint_axis, gt_joint_pos, gt_joint_value)
-            wandb.log({f"Eval/{self.loss_func} error": eval_loss.detach().cpu().item(),
-                       "Eval/joint axis error": joint_ori_error,
-                       "Eval/joint position error": joint_pos_error,
-                       "Eval/joint state error": joint_state_error,
-                       "Eval/camera rotation error": cam_rotation_error,
-                       "Eval/camera translation error": cam_translation_error,
-                       "Eval/moving map mIOU": soft_iou,
-                       "time": end_time - start_time,
-                       "lr": self.lr_scheduler.get_last_lr()[-1]}, step=i + 1)
+            if self.data_type == "sim":
+                joint_ori_error, joint_pos_error, joint_state_error, cam_rotation_error, cam_translation_error, soft_iou, valid = self.compute_estimation_error(gt_joint_type, gt_joint_axis, gt_joint_pos, gt_joint_value)
+                wandb.log({f"Eval/{self.loss_func} error": eval_loss.detach().cpu().item(),
+                        "Eval/joint axis error": joint_ori_error,
+                        "Eval/joint position error": joint_pos_error,
+                        "Eval/joint state error": joint_state_error,
+                        "Eval/camera rotation error": cam_rotation_error,
+                        "Eval/camera translation error": cam_translation_error,
+                        "Eval/moving map mIOU": soft_iou,
+                        "time": end_time - start_time,
+                        "lr": self.lr_scheduler.get_last_lr()[-1]}, step=i + 1)
+            else:
+                wandb.log({f"Eval/{self.loss_func} error": eval_loss.detach().cpu().item(),
+                            "time": end_time - start_time,
+                            "lr": self.lr_scheduler.get_last_lr()[-1]}, step=i + 1)
             if self.vis_pcd and (self.current_step % 20 == 0 or self.current_step == self.steps - 1):
                 self.visualize(gt_joint_axis, gt_joint_pos, vis_type="static")
                 self.visualize(gt_joint_axis, gt_joint_pos, vis_type="dynamic")
-            tbar.set_description("Loss: {:.6f} Joint Axis Error: {:.6f} Joint Pos Error: {:.6f} Joint State Error: {:.6f}"\
-                                .format(loss.item(), joint_ori_error, joint_pos_error, joint_state_error))
+            if self.data_type == "sim":
+                tbar.set_description("Loss: {:.6f} Joint Axis Error: {:.6f} Joint Pos Error: {:.6f} Joint State Error: {:.6f}"\
+                                    .format(loss.item(), joint_ori_error, joint_pos_error, joint_state_error))
+            else:
+                tbar.set_description("Loss: {:.6f}".format(loss.item()))
 
 
     def compute_estimation_error(self, gt_joint_type: str, gt_joint_axis: np.ndarray, gt_joint_pos: np.ndarray, gt_joint_value: np.ndarray) -> Tuple[float, float, float, float, float, float, bool]:
@@ -387,11 +362,17 @@ class BundleAdjustment(torch.nn.Module):
         pred_joint_points = self.best_joint_pos + self.best_joint_axis * tmp_range[:, np.newaxis]
         pred_joint_rgb = np.ones_like(pred_joint_points) * np.array([[25, 25, 178]])
         pred_joint_xyzrgb = np.hstack([pred_joint_points, pred_joint_rgb])
-        gt_joint_points = gt_joint_pos + gt_joint_axis * tmp_range[:, np.newaxis]
-        gt_joint_rgb = np.ones_like(gt_joint_points) * np.array([[255, 0, 255]])
-        gt_joint_xyzrgb = np.hstack([gt_joint_points, gt_joint_rgb])
+        if self.data_type == "sim":
+            gt_joint_points = gt_joint_pos + gt_joint_axis * tmp_range[:, np.newaxis]
+            gt_joint_rgb = np.ones_like(gt_joint_points) * np.array([[255, 0, 255]])
+            gt_joint_xyzrgb = np.hstack([gt_joint_points, gt_joint_rgb])
         # pcd
-        obj_pcd_list = []
+        if self.data_type == "real":
+            sample_surface_xyz = self.surface_xyz.detach().cpu().numpy()
+            sample_surface_index = np.random.choice(sample_surface_xyz.shape[0], min(4096, sample_surface_xyz.shape[0]), replace=False)
+            sample_surface_xyz = sample_surface_xyz[sample_surface_index]
+            sample_surface_rgb = np.ones_like(sample_surface_xyz) * 255
+            sample_surface_xyzrgb = np.hstack([sample_surface_xyz, sample_surface_rgb])
         N, H, W, C = self.xyz.shape
         camera_extrinsics = torch.eye(4, dtype=torch.float64).repeat(N, 1, 1).to(self.device)
         camera_rotations = quaternion_to_matrix(torch.from_numpy(self.best_camera_poses[:, :4]).to(self.device))
@@ -410,7 +391,7 @@ class BundleAdjustment(torch.nn.Module):
                 translations = joint_axis_norm.repeat(N, 1) * self.joint_state.reshape(N, 1) # N, 3
             pred_transformed_xyz = torch.matmul(pred_transformed_xyz, rotations.permute(0, 2, 1)) + translations.reshape(N, 1, 3) # N, H*W, 3
         
-        if vis_type == "static":
+        if self.data_type == "sim" and vis_type == "static":
             gt_camera_extrinsics = torch.from_numpy(self.gt_camera_se3).to(self.device)
             gt_xyz = torch.matmul(self.xyz.reshape(N, H*W, C), gt_camera_extrinsics[:, :3, :3].permute(0, 2, 1)) + gt_camera_extrinsics[:, :3, 3].reshape(N, 1, 3) # N, H*W, 3
         if self.mask_type == "monst3r":
@@ -435,48 +416,55 @@ class BundleAdjustment(torch.nn.Module):
             sample_index = np.random.choice(obj_xyzrgb.shape[0], sample_num, replace=False)
             obj_xyzrgb = obj_xyzrgb[sample_index]
 
-            if vis_type == "static":    
-                filter_gt_cam_transformed_xyz = gt_xyz[b, computable_mask, :].detach().cpu().numpy()
-                filter_gt_cam_transformed_rgb = np.ones_like(filter_gt_cam_transformed_xyz) * np.array([[255, 255, 255]])
-                gt_obj_xyzrgb = np.hstack([filter_gt_cam_transformed_xyz, filter_gt_cam_transformed_rgb])
-                sample_num = min(4096, gt_obj_xyzrgb.shape[0])
-                sample_index = np.random.choice(gt_obj_xyzrgb.shape[0], sample_num, replace=False)
-                gt_obj_xyzrgb = gt_obj_xyzrgb[sample_index]
-            elif vis_type == "dynamic":
-                gt_static_xyz = self.surface_static_xyz.detach().cpu().numpy()
-                gt_static_rgb = np.ones_like(gt_static_xyz) * np.array([[0, 255, 255]])
-                gt_static_xyzrgb = np.hstack([gt_static_xyz, gt_static_rgb])
-                gt_dynamic_xyz = self.surface_dynamic_xyz.detach().cpu().numpy()
-                gt_dynamic_rgb = np.ones_like(gt_dynamic_xyz) * np.array([[127, 0, 255]])
-                gt_dynamic_xyzrgb = np.hstack([gt_dynamic_xyz, gt_dynamic_rgb])
-                gt_xyzrgb = np.vstack([gt_static_xyzrgb, gt_dynamic_xyzrgb])
-                sample_surface_num = min(4096, gt_xyzrgb.shape[0])
-                sample_surface_index = np.random.choice(gt_xyzrgb.shape[0], sample_surface_num, replace=False)
-                gt_obj_xyzrgb = gt_xyzrgb[sample_surface_index, :]
-            prediction_pcd = np.vstack([pred_joint_xyzrgb, gt_joint_xyzrgb, obj_xyzrgb, gt_obj_xyzrgb])
+            if self.data_type == "sim":
+                if vis_type == "static":    
+                    filter_gt_cam_transformed_xyz = gt_xyz[b, computable_mask, :].detach().cpu().numpy()
+                    filter_gt_cam_transformed_rgb = np.ones_like(filter_gt_cam_transformed_xyz) * np.array([[255, 255, 255]])
+                    gt_obj_xyzrgb = np.hstack([filter_gt_cam_transformed_xyz, filter_gt_cam_transformed_rgb])
+                    sample_num = min(4096, gt_obj_xyzrgb.shape[0])
+                    sample_index = np.random.choice(gt_obj_xyzrgb.shape[0], sample_num, replace=False)
+                    gt_obj_xyzrgb = gt_obj_xyzrgb[sample_index]
+                elif vis_type == "dynamic":
+                    gt_static_xyz = self.surface_static_xyz.detach().cpu().numpy()
+                    gt_static_rgb = np.ones_like(gt_static_xyz) * np.array([[0, 255, 255]])
+                    gt_static_xyzrgb = np.hstack([gt_static_xyz, gt_static_rgb])
+                    gt_dynamic_xyz = self.surface_dynamic_xyz.detach().cpu().numpy()
+                    gt_dynamic_rgb = np.ones_like(gt_dynamic_xyz) * np.array([[127, 0, 255]])
+                    gt_dynamic_xyzrgb = np.hstack([gt_dynamic_xyz, gt_dynamic_rgb])
+                    gt_xyzrgb = np.vstack([gt_static_xyzrgb, gt_dynamic_xyzrgb])
+                    sample_surface_num = min(4096, gt_xyzrgb.shape[0])
+                    sample_surface_index = np.random.choice(gt_xyzrgb.shape[0], sample_surface_num, replace=False)
+                    gt_obj_xyzrgb = gt_xyzrgb[sample_surface_index, :]
+                prediction_pcd = np.vstack([pred_joint_xyzrgb, gt_joint_xyzrgb, obj_xyzrgb, gt_obj_xyzrgb])
+            else:
+                prediction_pcd = np.vstack([pred_joint_xyzrgb, obj_xyzrgb, sample_surface_xyzrgb])
             wandb.log({f"Vis_{vis_type}/frame{b}": wandb.Object3D(prediction_pcd)}, self.current_step + 1)
             
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--data_type", type=str, choices=["sim", "real"], required=True)
     parser.add_argument("--exp_name", type=str, required=True)
     parser.add_argument("--view_dir", type=str, required=True)
     parser.add_argument("--preprocess_dir", type=str, required=True)
     parser.add_argument("--prediction_dir", type=str, required=True)
-    parser.add_argument("--meta_file_path", type=str, default="new_partnet_mobility_dataset_correct_intr_meta.json")
+    parser.add_argument("--meta_file_path", type=str, default="new_partnet_mobility_dataset_correct_intr_meta.json", help="Only required for sim data, the path to the metadata file.")
     parser.add_argument("--mask_type", type=str, choices=["gt", "monst3r"], required=True)
     parser.add_argument("--joint", type=str, choices=["revolute", "prismatic"], required=True)
     parser.add_argument("--loss", type=str, choices=["chamfer", "hausdorff"], required=True)
     parser.add_argument("--steps", type=int, default=400)
     parser.add_argument("--lr", type=float, default=5e-3)
     parser.add_argument("--device", type=str, default="cuda:0")
-    parser.add_argument("--vis", action="store_true", default=False)
+    parser.add_argument("--vis", action="store_true", default=False, help="Visualize the prediction results.")
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
     
-    data_loader = SimDataLoader(args.meta_file_path, args.view_dir, args.preprocess_dir, None)
-
-    gt_joint_type, gt_joint_axis, gt_joint_pos, gt_joint_value = data_loader.load_gt_joint_params()
+    if args.data_type == "sim":
+        data_loader = SimDataLoader(args.view_dir, args.preprocess_dir, args.meta_file_path, None)
+        gt_joint_type, gt_joint_axis, gt_joint_pos, gt_joint_value = data_loader.load_gt_joint_params()
+    elif args.data_type == "real":
+        data_loader = RealDataLoader(args.view_dir, args.preprocess_dir)
+        gt_joint_type, gt_joint_axis, gt_joint_pos, gt_joint_value = None, None, None, None
 
     opt_steps = args.steps
     device = torch.device(args.device)

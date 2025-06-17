@@ -140,7 +140,7 @@ def compute_geometry_error(gt_full_pcd: np.ndarray, gt_moving_pcd: np.ndarray, g
 
 
 def main(args):
-    data_loader = SimDataLoader(args.meta_file_path, args.view_dir, None, args.partnet_mobility_dir)
+    data_loader = SimDataLoader(args.view_dir, None, args.meta_file_path, args.partnet_mobility_dir)
     surface_rgb, surface_xyz = data_loader.load_obj_surface(sample_num=480 * 64, return_segments=False)
 
     gt_joint_type, gt_joint_axis, gt_joint_pos, gt_joint_value = data_loader.load_gt_joint_params()
