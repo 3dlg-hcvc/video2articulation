@@ -102,6 +102,19 @@ This step will compute the video moving map with [MonST3R](https://github.com/Ju
    --level small
    ```
 
+4. **Real Data Only**. Scale up original depth maps with [PromptDA](https://github.com/DepthAnything/PromptDA). In our paper we use iPhone 12 pro to capture real data. The original depth map is in 192 $\times$ 256, which is a very low resolution. Naively scale up the depth map via bilinear interpolation will produce noisy depth map. Therefore, we leverage PromptDA to scale up the depth map with relatively high quality. Inside the `PromptDA/` directory, run
+   ```bash
+   python scale_depth.py \
+   --image_dir ../real_data/raw_data/book/surface/keyframes/corrected_images/ \
+   --depth_dir ../real_data/raw_data/book/surface/keyframes/depth/ \
+   --save_dir ../real_data/exp_results/preprocessing/book/prompt_depth_surface
+
+   python scale_depth.py \
+   --image_dir ../real_data/raw_data/book/rgb/ \
+   -depth_dir ../real_data/raw_data/book/depth/ \
+   --save_dir ../real_data/exp_results/preprocessing/book/prompt_depth_video
+   ```
+
 </details>
 
 ## Coarse Prediction

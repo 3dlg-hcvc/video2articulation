@@ -4,3 +4,6 @@
 [submodule "monst3r"]
 	path = monst3r
 	url = https://github.com/willipwk/monst3r.git
+[submodule "PromptDA"]
+	path = PromptDA
+	url = https://github.com/willipwk/PromptDA.git
