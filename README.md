@@ -58,6 +58,18 @@ project_root_directory
          |__partnet_mobility_data_split.yaml
          ......
 ```
+
+## (Optional) Synthetic Data Generation
+<details>
+<summary> Click to expand</summary>
+
+We also provide the template for generating synthetic dataset. Note that not all synthetic data in our dataset are generated with exactly the same script and same parameters.
+```bash
+python render_interaction_sim.py
+```
+
+</details>
+
 ## (Optional) Preprocessing
 <details>
 <summary>Click to expand</summary>
