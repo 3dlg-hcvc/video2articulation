@@ -3,6 +3,8 @@
 ### iTACO: Interactable Digital Twins of Articulated Objects from Casually Captured RGBD Videos
 [Weikun Peng](https://www.linkedin.com/in/weikun-peng-7731281b4/), [Jun Lv](https://lyuj1998.github.io/), [Cewu Lu](https://www.mvig.org/), [Manolis Savva](https://msavva.github.io/)
 
+### 3DV 2026
+
 ![teaser](./docs/static/images/teaser.png)
 
 [Website](https://3dlg-hcvc.github.io/video2articulation/) | [arXiv](https://arxiv.org/abs/2506.08334) | [Data](https://huggingface.co/datasets/3dlg-hcvc/video2articulation)
