@@ -193,11 +193,11 @@ python evaluate.py \
 ## Citation
 If you find our work to be helpful, please consider cite our paper
 ```bibtex
-@article{peng2025videoarticulation,
-   Author = {Weikun Peng and Jun Lv and Cewu Lu and Manolis Savva},
-   Title = {Generalizable Articulated Object Reconstruction from Casually Captured RGBD Videos},
-   Year = {2025},
-   Journal={arXiv preprint arXiv:2506.08334},
+@inproceedings{peng2025itaco,
+ booktitle = {3DV 2026},
+ author = {Weikun Peng and Jun Lv and Cewu Lu and Manolis Savva},
+ title = {{iTACO: Interactable Digital Twins of Articulated Objects from Casually Captured RGBD Videos}},
+ year = {2025}
 }
 ```
 
