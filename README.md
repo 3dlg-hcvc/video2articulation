@@ -1,8 +1,6 @@
-# Video2Articulation
+# iTACO
 
-:warning: *This repository is under active construction*
-
-### Generalizable Articulated Object Reconstruction from Casually Captured RGBD Videos
+### iTACO: Interactable Digital Twins of Articulated Objects from Casually Captured RGBD Videos
 [Weikun Peng](https://www.linkedin.com/in/weikun-peng-7731281b4/), [Jun Lv](https://lyuj1998.github.io/), [Cewu Lu](https://www.mvig.org/), [Manolis Savva](https://msavva.github.io/)
 
 ![teaser](./docs/static/images/teaser.png)
